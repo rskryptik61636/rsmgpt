@@ -6,6 +6,9 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rsmgpt", "rsmgpt\rsmgpt.vcxproj", "{04652124-0279-4425-8F3F-ADE9BCFCA799}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rsmgpt_exe", "rsmgpt_exe\rsmgpt_exe.vcxproj", "{761817BE-AC7C-4E1C-8338-823E271FD1A4}"
+	ProjectSection(ProjectDependencies) = postProject
+		{04652124-0279-4425-8F3F-ADE9BCFCA799} = {04652124-0279-4425-8F3F-ADE9BCFCA799}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
