@@ -49,6 +49,11 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="..\src\rsmgptPathTracingKernel.hlsl" />
+    <FxCompile Include="..\src\rsmgptPathTracingOutputVS.hlsl" />
+    <FxCompile Include="..\src\rsmgptPathTracingOutputPS.hlsl" />
+    <FxCompile Include="..\src\rsmgptPathTracingKernelCS.hlsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\src\rsmgptPathTracingCommon.hlsli" />
   </ItemGroup>
 </Project>

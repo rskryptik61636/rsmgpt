@@ -20,22 +20,16 @@
 * THE SOFTWARE.
 ******************************************************************************/
 
-// Per frame constants.
-cbuffer cbPerFrame : register( b0 )
+// Path tracer output VS input struct.
+struct VS_IN
 {
-    float3  gCamPos;             // Camera position.
-    float   gCamAspectRatio;     // Camera aspect ratio.
-    float3  gCamDir;             // Camera direction.    
-}
+    float4 position : POSITION;
+    float2 texCoord : TEXCOORD;
+};
 
-// NOTE: Hardcoding the thread groups dims for now, will be updated as necessary.
-#define TG_SIZE 16
-
-[ numthreads( TG_SIZE, TG_SIZE, 1 ) ]
-void main( 
-    uint3 groupId	        : SV_GroupID,
-    uint3 dispatchThreadId  : SV_DispatchThreadID,
-    uint3 groupThreadId     : SV_GroupThreadID
-    )
+// Path tracer output PS input struct.
+struct PS_IN
 {
-}
+    float4 position : SV_POSITION;
+    float2 texCoord : TEXCOORD;
+};
