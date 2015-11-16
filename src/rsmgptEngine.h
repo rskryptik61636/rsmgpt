@@ -24,27 +24,43 @@
 
 #include <DXSample.h>
 #include "rsmgptDefns.h"
+#include "rsmgptResourceBinding.h"
 
 #include <array>
 #include <filesystem>
+
+#if 0
+#include <GameCore.h>
+#include <GraphicsCore.h>
+#include <CommandContext.h>
+#include <SamplerManager.h>
+#include <BufferManager.h>  
+#endif // 0
 
 namespace rsmgpt 
 {
 	using path = std::tr2::sys::path;
 
-	// Path tracing engine.
-	class Engine : public DXSample
-	{
-	public:
-		Engine(const path sceneFile);
-		~Engine();
+#if 0
+    using namespace GameCore;
+    using namespace Math;
+    using namespace Graphics;
+#endif // 0
 
-	protected:
-		virtual void OnInit() override;
-		virtual void OnUpdate() override;
-		virtual void OnRender() override;
-		virtual void OnDestroy() override;
-		virtual bool OnEvent(MSG msg) override;
+
+    // Path tracing engine.
+    class Engine : public DXSample
+    {
+    public:
+        Engine( const path sceneFile );
+        ~Engine();
+
+    protected:
+        virtual void OnInit() override;
+        virtual void OnUpdate() override;
+        virtual void OnRender() override;
+        virtual void OnDestroy() override;
+        virtual bool OnEvent( MSG msg ) override;
 
         // Engine constants.
         static const UINT FrameCount = 2;   // TODO: Rename to m_FrameCount once we've got whatever code we need from the D3D12 samples.
@@ -58,7 +74,6 @@ namespace rsmgpt
         };
 
         // Per frame constants.
-        // TODO: float[] will need to be swapped out for the XMFloat type.
         struct ConstantBufferData
         {
             Vec3    gCamPos;            // Camera position.
@@ -67,28 +82,10 @@ namespace rsmgpt
 
             float   pad2[ 57 ];         // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
-        //std::array<ConstantBufferData, FrameCount> m_cbPerFrame;
-
-        // Root constants for the compute shader.
-        struct CSRootConstants
-        {
-            float xOffset;
-            float zOffset;
-            float cullOffset;
-            float commandCount;
-        };
-
-        // Data structure to match the command signature used for ExecuteIndirect.
-        struct IndirectCommand
-        {
-            D3D12_GPU_VIRTUAL_ADDRESS cbv;
-            D3D12_DRAW_ARGUMENTS drawArguments;
-        };
 
         // Graphics root signature parameter offsets.
         enum GraphicsRootParameters
         {
-            //Cbv,
             SrvTable,                        // SRV to the path tracer's render target
             GraphicsRootParametersCount
         };
@@ -110,19 +107,13 @@ namespace rsmgpt
             CbvSrvUavDescriptorCountPerFrame = SrvOffset + 1
         };
 
-        // TODO: Delete the ones we don't end up using.
-
         // Each triangle gets its own constant buffer per frame.
         std::vector<ConstantBufferData> m_constantBufferData;
         UINT8* m_pCbvDataBegin;
 
-        CSRootConstants m_csRootConstants;	// Constants for the compute shader.
-        bool m_enableCulling;				// Toggle whether the compute shader pre-processes the indirect commands.
-
         // Pipeline objects.
         D3D12_VIEWPORT m_viewport;
         D3D12_RECT m_scissorRect;
-        D3D12_RECT m_cullingScissorRect;
         ComPtr<IDXGISwapChain3> m_swapChain;
         ComPtr<ID3D12Device> m_device;
         ComPtr<ID3D12Resource> m_renderTargets[ FrameCount ];
@@ -130,18 +121,13 @@ namespace rsmgpt
         ComPtr<ID3D12CommandAllocator> m_computeCommandAllocators[ FrameCount ];
         ComPtr<ID3D12CommandQueue> m_commandQueue;
         ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
-        ComPtr<ID3D12RootSignature> m_rootSignature;
-        ComPtr<ID3D12RootSignature> m_computeRootSignature;
+        RootSignature m_gfxRootSignature;
+        RootSignature m_computeRootSignature;
         ComPtr<ID3D12CommandSignature> m_commandSignature;
-        ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
-        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-        ComPtr<ID3D12DescriptorHeap> m_cbvSrvUavHeap;
-        UINT m_rtvDescriptorSize;
-        UINT m_cbvSrvUavDescriptorSize;
+        CsuDescriptorHeapPtr m_pCsuHeap;
+        RtvDescriptorHeapPtr m_pRtvHeap;
+        DsvDescriptorHeapPtr m_pDsvHeap;
         UINT m_frameIndex;
-        CD3DX12_CPU_DESCRIPTOR_HANDLE m_cbvSrvUavHeapCpuHandle;
-        CD3DX12_GPU_DESCRIPTOR_HANDLE m_cbvSrvUavHeapGpuHandle;
-        D3D12_GPU_VIRTUAL_ADDRESS m_cbvSrvUavHeapGpuVA;
 
         // Synchronization objects.
         ComPtr<ID3D12Fence> m_fence;
@@ -158,14 +144,35 @@ namespace rsmgpt
         ComPtr<ID3D12Resource> m_constantBuffer;
         ComPtr<ID3D12Resource> m_depthStencil;
         ComPtr<ID3D12Resource> m_pathTracerOutput;
-        ComPtr<ID3D12Resource> m_commandBuffer;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 
         // TODO: Resurrect in case we decide to use execute indirect at some point.
 #if 0
+        // Root constants for the compute shader.
+        struct CSRootConstants
+        {
+            float xOffset;
+            float zOffset;
+            float cullOffset;
+            float commandCount;
+        };
+
+        // Data structure to match the command signature used for ExecuteIndirect.
+        struct IndirectCommand
+        {
+            D3D12_GPU_VIRTUAL_ADDRESS cbv;
+            D3D12_DRAW_ARGUMENTS drawArguments;
+        };
+
+        CSRootConstants m_csRootConstants;	// Constants for the compute shader.
+        bool m_enableCulling;				// Toggle whether the compute shader pre-processes the indirect commands.
+
+        D3D12_RECT m_cullingScissorRect;
         ComPtr<ID3D12Resource> m_processedCommandBuffers[ FrameCount ];
         ComPtr<ID3D12Resource> m_processedCommandBufferCounters[ FrameCount ];
         UINT8* m_pMappedUavCounters[ FrameCount ];
+        ComPtr<ID3D12Resource> m_commandBuffer;
+
 #endif // 0
 
         // Asset paths.
@@ -174,7 +181,92 @@ namespace rsmgpt
         // Helper functions.
         void WaitForGpu();
         void MoveToNextFrame();
-        void CreateShaderBlob(const char* shaderName, ID3DBlob** ppBlob);        
-	};
+        void CreateShaderBlob( const char* shaderName, ID3DBlob** ppBlob );
+    };
+
+#if 0
+    // Path tracing engine.
+    class Engine : public DXSample //IGameApp
+    {
+    public:
+        Engine( const path sceneFile );
+        ~Engine();
+
+        virtual void OnInit() override;
+        virtual void OnUpdate() override;
+        virtual void OnRender() override;
+        virtual void OnDestroy() override;
+        virtual bool OnEvent( MSG msg ) override;
+
+        /*virtual void Startup( void ) override;
+        virtual void Cleanup( void ) override;
+
+        virtual void Update( float deltaT ) override;
+        virtual void RenderScene( void ) override;*/
+
+    protected:
+
+        // Engine constants.
+        static const UINT FrameCount = 3;   // TODO: Rename to m_FrameCount once we've got whatever code we need from the D3D12 samples.
+        static const UINT ComputeBlockSize = 16;
+
+        // Per frame constants.
+        // NOTE: MiniEngine requires the struct to be 16-byte aligned.
+        /*__declspec( align( 16 ) )*/ struct ConstantBufferData
+        {
+            Vec3    gCamPos;            // Camera position.
+            float   gCamAspectRatio;    // Camera aspect ratio.
+            Vec3    gCamDir;            // Camera direction.
+
+            float   pad2[ 57 ];         // Constant buffers are 256 byte aligned.
+        } m_cbPerFrame;
+
+        // Graphics root signature parameter offsets.
+        enum GraphicsRootParameters
+        {
+            SrvTable,                        // SRV to the path tracer's render target
+            GraphicsRootParametersCount
+        };
+
+        // Compute root signature parameter offsets.
+        enum ComputeRootParameters
+        {
+            CbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
+            UavTable,                   // Uav for the path tracing output to be rendered.    
+            ComputeRootParametersCount
+        };
+
+        // Params.
+        UINT m_frameIndex;
+        uint64_t m_computeFence, m_gfxFence;
+        path m_shadersDir;
+        DXGI_FORMAT m_rtFormat, m_dsFormat;
+
+        // Pipeline objects.
+        D3D12_VIEWPORT m_viewport;
+        D3D12_RECT m_scissorRect;
+        ComPtr<IDXGISwapChain3> m_swapChain;
+        ComPtr<ID3D12Device> m_device;
+        CommandListManager m_commandManager;
+
+        // TODO: Remove when done testing.
+        /*GraphicsContext m_gfxContext;
+        ComputeContext m_computeContext;*/
+
+        RootSignature m_gfxRootSignature;
+        RootSignature m_computeRootSignature;
+
+        GraphicsPSO m_gfxPSO;
+        ComputePSO m_computePSO;
+
+        // Resources.
+        DepthBuffer m_depthStencil;
+        ColorBuffer m_pathTracerOutput;
+        ColorBuffer m_renderTargets[ FrameCount ];
+    };
+#endif // 0
+
+
+
 
 }	// end of namespace rsmgpt

@@ -28,9 +28,20 @@ using namespace rsmgpt;
 #pragma message("Linking against rsmgpt.lib")
 #pragma comment(lib, "rsmgpt.lib")
 
-_Use_decl_annotations_
+#if 0
+#pragma message("Linking against Core.lib")
+#pragma comment(lib, "Core.lib")
+
+#pragma message("Linking against ZLib.lib")
+#pragma comment(lib, "ZLib.lib")  
+#endif // 0
+
+
+//CREATE_APPLICATION( Engine );
+
+//_Use_decl_annotations_
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 {
 	Engine pathTracer("");
-	return pathTracer.Run(hInstance, nCmdShow);
+    return pathTracer.Run( hInstance, nCmdShow );
 }
