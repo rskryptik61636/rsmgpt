@@ -28,6 +28,9 @@ using namespace rsmgpt;
 #pragma message("Linking against rsmgpt.lib")
 #pragma comment(lib, "rsmgpt.lib")
 
+#pragma message("Linking against DirectXTK.lib")
+#pragma comment(lib, "DirectXTK.lib")
+
 #if 0
 #pragma message("Linking against Core.lib")
 #pragma comment(lib, "Core.lib")

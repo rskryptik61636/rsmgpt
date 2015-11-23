@@ -76,11 +76,15 @@ namespace rsmgpt
         // Per frame constants.
         struct ConstantBufferData
         {
-            Vec3    gCamPos;            // Camera position.
-            float   gCamAspectRatio;    // Camera aspect ratio.
-            Vec3    gCamDir;            // Camera direction.
+            // TODO: We probably don't need these anymore.
+            //Vec3    gCamPos;            // Camera position.
+            //float   gCamAspectRatio;    // Camera aspect ratio.
+            //Vec3    gCamDir;            // Camera direction.
 
-            float   pad2[ 57 ];         // Constant buffers are 256 byte aligned.
+            // Raster to world space transformation matrix.
+            Mat4 gRasterToWorld;
+
+            float   pad2[ 48 ];         // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
         // Graphics root signature parameter offsets.

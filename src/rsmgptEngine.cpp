@@ -402,12 +402,54 @@ namespace rsmgpt
                 D3D12_RESOURCE_STATE_GENERIC_READ,
                 nullptr,
                 IID_PPV_ARGS( &m_constantBuffer ) ) );
+
+            // TODO: Testing out camera transforms. Remove when done testing.
+            const float fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );
+            const float
+                fov( .5f * XM_PI /*90*/ ),
+                aspectRatio( fWidth / fHeight ),
+                nearPlane( /*1e-2f*/ 1.f ),
+                farPlane( 1000.f ),
+                screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
+                screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
+                screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
+                screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
+
+            // Perspective transformation matrix. The canonical form transforms points to homogenous clip space in [-1,1].
+            const float zScale( farPlane / ( farPlane - nearPlane ) ), zTrans( -( farPlane * nearPlane ) / ( farPlane - nearPlane ) );
+            const float xScale( 1 / tanf( fov / 2 ) ), yScale( xScale );
+            const Mat4 worldToCamera( Mat4::Identity );
+            const Mat4 cameraToScreen( Mat4::CreateScale( xScale, yScale, zScale ) * Mat4::CreateTranslation( 0, 0, zTrans ) );
+            //const Mat4 cameraToScreen(
+            //    xScale, 0.f, 0.f, 0.f,
+            //    0.f, yScale, 0.f, 0.f,
+            //    0.f, 0.f, zScale, 1.f,
+            //    0.f, 0.f, zTrans, 0.f );  // Transforms from camera space to D3D style clip space (x,y in [-1,1] and z in [0,1])
+
+            // Transforms from clip space to raster (window) space.
+            const Mat4 screenToRaster( 
+                Mat4::CreateTranslation( -screenxmin, -screenymin, 0.f ) *  // Translate to top left corner of viewport.
+                Mat4::CreateScale( 1.f / ( screenxmax - screenxmin ), 1.f / ( screenymax - screenymin ), 1.f ) *    // Transform to NDC [0,1].
+                Mat4::CreateScale( fWidth, fHeight, 1.f ) );    // Transforms to raster coords [0,width/height-1]
+            const Mat4 rasterToWorld( ( worldToCamera * cameraToScreen * screenToRaster ).Invert() );    // Inverse transform from raster space to camera space.
+
+            // TODO: Remove when done testing.
+            //const Mat4 rasterToWorld( /*screenToRaster.Invert()*/ cameraToScreen );    // Transforms to raster coords [0,width/height-1]
+
+            // Test transform a raster space coord to camera space.
+            Vec4 pt( 640, 512, nearPlane, 1 );
+            //Vec4 pt( 10, 10, 0, 1 );
+            Vec4 res = Vec4::Transform( pt, rasterToWorld );
+            ////res.Normalize();
+            
+            ////Math::Vector4 res = Math::Vector4::Transform( Math::Vector4( 10, 0, 0, 1 ), /*Mat4::Identity*/ cameraToScreen );       
                                     
             // Initialize the constant buffer data.
-            // TODO: Using the default params from smallpt. Update when we implement a dynamic camera system.
-            m_cbPerFrame.gCamPos = Vec3( 50.f, 52.f, 295.6f );
-            m_cbPerFrame.gCamAspectRatio = .5135f;
-            m_cbPerFrame.gCamDir = Vec3( 0.f, -0.042612f, -1.f );
+            m_cbPerFrame.gRasterToWorld = rasterToWorld.Transpose();
+            //// TODO: Using the default params from smallpt. Update when we implement a dynamic camera system.
+            //m_cbPerFrame.gCamPos = Vec3( 50.f, 52.f, 295.6f );
+            //m_cbPerFrame.gCamAspectRatio = .5135f;
+            //m_cbPerFrame.gCamDir = Vec3( 0.f, -0.042612f, -1.f );
 
             // Get the GPU address of m_cbPerFrame.
             auto cbPerFrameGpuVA = m_constantBuffer->GetGPUVirtualAddress();

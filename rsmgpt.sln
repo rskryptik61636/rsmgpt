@@ -10,6 +10,11 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rsmgpt_exe", "rsmgpt_exe\rs
 		{04652124-0279-4425-8F3F-ADE9BCFCA799} = {04652124-0279-4425-8F3F-ADE9BCFCA799}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rsmgpt_sandbox", "rsmgpt_sandbox\rsmgpt_sandbox.vcxproj", "{2711FA38-AA5D-4EE0-8130-799747344F10}"
+	ProjectSection(ProjectDependencies) = postProject
+		{04652124-0279-4425-8F3F-ADE9BCFCA799} = {04652124-0279-4425-8F3F-ADE9BCFCA799}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -34,6 +39,14 @@ Global
 		{761817BE-AC7C-4E1C-8338-823E271FD1A4}.Release|x64.Build.0 = Release|x64
 		{761817BE-AC7C-4E1C-8338-823E271FD1A4}.Release|x86.ActiveCfg = Release|Win32
 		{761817BE-AC7C-4E1C-8338-823E271FD1A4}.Release|x86.Build.0 = Release|Win32
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Debug|x64.ActiveCfg = Debug|x64
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Debug|x64.Build.0 = Debug|x64
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Debug|x86.ActiveCfg = Debug|Win32
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Debug|x86.Build.0 = Debug|Win32
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Release|x64.ActiveCfg = Release|x64
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Release|x64.Build.0 = Release|x64
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Release|x86.ActiveCfg = Release|Win32
+		{2711FA38-AA5D-4EE0-8130-799747344F10}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
