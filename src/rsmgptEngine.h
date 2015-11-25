@@ -25,6 +25,7 @@
 #include <DXSample.h>
 #include "rsmgptDefns.h"
 #include "rsmgptResourceBinding.h"
+#include "rsmgptCamera.h"
 
 #include <array>
 #include <filesystem>
@@ -81,10 +82,10 @@ namespace rsmgpt
             //float   gCamAspectRatio;    // Camera aspect ratio.
             //Vec3    gCamDir;            // Camera direction.
 
-            // Raster to world space transformation matrix.
-            Mat4 gRasterToWorld;
+            Mat4    gRasterToWorld; // Raster to world space transformation matrix.
+            Vec3    gCamPos;        // Camera position.
 
-            float   pad2[ 48 ];         // Constant buffers are 256 byte aligned.
+            float   pad[ 19 ];         // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
         // Graphics root signature parameter offsets.
@@ -149,6 +150,9 @@ namespace rsmgpt
         ComPtr<ID3D12Resource> m_depthStencil;
         ComPtr<ID3D12Resource> m_pathTracerOutput;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+
+        // Camera object.
+        PerspectiveCameraPtr m_pCamera;
 
         // TODO: Resurrect in case we decide to use execute indirect at some point.
 #if 0

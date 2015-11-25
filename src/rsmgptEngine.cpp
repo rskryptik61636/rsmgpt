@@ -404,17 +404,42 @@ namespace rsmgpt
                 IID_PPV_ARGS( &m_constantBuffer ) ) );
 
             // TODO: Testing out camera transforms. Remove when done testing.
-            const float fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );
+            //const float fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );
             const float
+                focalLength( 1.f ),
+                lensRadius( 1.f ),
+                fWidth( static_cast<float>( m_width ) ), 
+                fHeight( static_cast<float>( m_height ) ),
                 fov( .5f * XM_PI /*90*/ ),
                 aspectRatio( fWidth / fHeight ),
                 nearPlane( /*1e-2f*/ 1.f ),
                 farPlane( 1000.f ),
+                motionFactor( .05f ),
+                rotationFactor( .05f ),
                 screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
                 screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
+            const Vec3 eye( 0, 0, 0 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+            m_pCamera.reset(
+                new PerspectiveCamera(
+                    eye,
+                    lookAt,
+                    up,
+                    focalLength,
+                    lensRadius,
+                    fWidth,
+                    fHeight,
+                    fov,
+                    aspectRatio,
+                    nearPlane,
+                    farPlane,
+                    motionFactor,
+                    rotationFactor ) );
+            const Mat4 rasterToWorld( m_pCamera->rasterToWorld() );
 
+            // TODO: Remove when done testing.
+#if 0
             // Perspective transformation matrix. The canonical form transforms points to homogenous clip space in [-1,1].
             const float zScale( farPlane / ( farPlane - nearPlane ) ), zTrans( -( farPlane * nearPlane ) / ( farPlane - nearPlane ) );
             const float xScale( 1 / tanf( fov / 2 ) ), yScale( xScale );
@@ -427,29 +452,27 @@ namespace rsmgpt
             //    0.f, 0.f, zTrans, 0.f );  // Transforms from camera space to D3D style clip space (x,y in [-1,1] and z in [0,1])
 
             // Transforms from clip space to raster (window) space.
-            const Mat4 screenToRaster( 
+            const Mat4 screenToRaster(
                 Mat4::CreateTranslation( -screenxmin, -screenymin, 0.f ) *  // Translate to top left corner of viewport.
                 Mat4::CreateScale( 1.f / ( screenxmax - screenxmin ), 1.f / ( screenymax - screenymin ), 1.f ) *    // Transform to NDC [0,1].
                 Mat4::CreateScale( fWidth, fHeight, 1.f ) );    // Transforms to raster coords [0,width/height-1]
-            const Mat4 rasterToWorld( ( worldToCamera * cameraToScreen * screenToRaster ).Invert() );    // Inverse transform from raster space to camera space.
+            const Mat4 rasterToWorld( ( worldToCamera * cameraToScreen * screenToRaster ).Invert() );    // Inverse transform from raster space to camera space.  
+#endif // 0
+
 
             // TODO: Remove when done testing.
             //const Mat4 rasterToWorld( /*screenToRaster.Invert()*/ cameraToScreen );    // Transforms to raster coords [0,width/height-1]
 
-            // Test transform a raster space coord to camera space.
-            Vec4 pt( 640, 512, nearPlane, 1 );
-            //Vec4 pt( 10, 10, 0, 1 );
-            Vec4 res = Vec4::Transform( pt, rasterToWorld );
-            ////res.Normalize();
+            //// Test transform a raster space coord to camera space.
+            //Vec3 pt( 640, 512, nearPlane );
+            ////Vec4 pt( 10, 10, 0, 1 );
+            //Vec3 res = Vec3::Transform( pt, rasterToWorld );
+            //res.Normalize();
             
             ////Math::Vector4 res = Math::Vector4::Transform( Math::Vector4( 10, 0, 0, 1 ), /*Mat4::Identity*/ cameraToScreen );       
                                     
-            // Initialize the constant buffer data.
-            m_cbPerFrame.gRasterToWorld = rasterToWorld.Transpose();
-            //// TODO: Using the default params from smallpt. Update when we implement a dynamic camera system.
-            //m_cbPerFrame.gCamPos = Vec3( 50.f, 52.f, 295.6f );
-            //m_cbPerFrame.gCamAspectRatio = .5135f;
-            //m_cbPerFrame.gCamDir = Vec3( 0.f, -0.042612f, -1.f );
+            //// Initialize the constant buffer data.
+            //m_cbPerFrame.gRasterToWorld = rasterToWorld.Transpose();
 
             // Get the GPU address of m_cbPerFrame.
             auto cbPerFrameGpuVA = m_constantBuffer->GetGPUVirtualAddress();
@@ -464,7 +487,7 @@ namespace rsmgpt
             // Map the constant buffers. We don't unmap this until the app closes.
             // Keeping things mapped for the lifetime of the resource is okay.
             ThrowIfFailed( m_constantBuffer->Map( 0, nullptr, reinterpret_cast<void**>( &m_pCbvDataBegin ) ) );
-            memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );
+            //memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );   // This will be updated at runtime.
                         
         }
 
@@ -536,6 +559,34 @@ namespace rsmgpt
 
 	void Engine::OnUpdate()
 	{
+        // Move the camera.
+        if( m_pCamera.get() )
+        {
+            if( GetAsyncKeyState( 'A' ) & 0x8000 )	m_pCamera->slide( -m_pCamera->motionFactor(), 0, 0 );	// move left	
+            if( GetAsyncKeyState( 'D' ) & 0x8000 )	m_pCamera->slide( m_pCamera->motionFactor(), 0, 0 );	// move right
+            if( GetAsyncKeyState( 'W' ) & 0x8000 )	m_pCamera->slide( 0, 0, m_pCamera->motionFactor() );		// move forward
+            if( GetAsyncKeyState( 'S' ) & 0x8000 )	m_pCamera->slide( 0, 0, -m_pCamera->motionFactor() );		// move backward
+            if( GetAsyncKeyState( 'Q' ) & 0x8000 )	m_pCamera->slide( 0, m_pCamera->motionFactor(), 0 );			// move up
+            if( GetAsyncKeyState( 'E' ) & 0x8000 )	m_pCamera->slide( 0, -m_pCamera->motionFactor(), 0 );			// move down
+
+            if( GetAsyncKeyState( VK_NUMPAD4 ) & 0x8000 )	m_pCamera->rotateY( -m_pCamera->rotationFactor() );	// yaw left
+            if( GetAsyncKeyState( VK_NUMPAD6 ) & 0x8000 )	m_pCamera->rotateY( m_pCamera->rotationFactor() );	// yaw right
+            if( GetAsyncKeyState( VK_NUMPAD8 ) & 0x8000 )	m_pCamera->pitch( -m_pCamera->rotationFactor() );		// pitch up
+            if( GetAsyncKeyState( VK_NUMPAD5 ) & 0x8000 )	m_pCamera->pitch( m_pCamera->rotationFactor() );		// pitch down
+
+            // Zoom in/out according to the keyboard input
+            if( GetAsyncKeyState( VK_NUMPAD1 ) & 0x8000 )	m_pCamera->zoomOut();	// zoom out
+            if( GetAsyncKeyState( VK_NUMPAD3 ) & 0x8000 )	m_pCamera->zoomIn();	// zoom in
+
+            // NOTE: Disabling rolls as we don't really need them.
+#if 0
+            if( GetAsyncKeyState( VK_NUMPAD7 ) & 0x8000 )	m_pCamera->roll( m_pCamera->rotationFactor() );			// roll left
+            if( GetAsyncKeyState( VK_NUMPAD9 ) & 0x8000 )	m_pCamera->roll( -m_pCamera->rotationFactor() );			// roll right
+#endif	// 0
+
+            
+        }
+
 		// TODO: Add implementation here.
 	}
 
@@ -562,6 +613,11 @@ namespace rsmgpt
             static_cast<UINT>( cbvSrvUavHeaps.size() ),
             cbvSrvUavHeaps.data() );
 
+        // Update m_cbPerFrame.
+        m_cbPerFrame.gRasterToWorld = m_pCamera->rasterToWorld().Transpose();
+        m_cbPerFrame.gCamPos = m_pCamera->eyePosW();
+        memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );   // This will be updated at runtime.
+        
         // Set the compute pipeline bindings.
         m_computeCommandList->SetComputeRootConstantBufferView( CbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
         m_computeCommandList->SetComputeRootDescriptorTable(

@@ -30,6 +30,7 @@ cbuffer cbPerFrame : register( b0 )
     //float3  gCamDir;             // Camera direction.    
 
     float4x4 gRasterToWorld;
+    float3  gCamPos;             // Camera position.
 }
 
 // Path tracing output texture.
@@ -56,10 +57,10 @@ void main(
 {
     // Get the raster space coords of the current pixel and convert into world space to serve as the ray direction.
     float4 rasterCoords = float4( float( dispatchThreadId.x ), float( dispatchThreadId.y ), 0.f, 1 );
-    float3 rayDir = normalize( mul( rasterCoords, gRasterToWorld ).xyz );
+    float3 rayDir = normalize( ( mul( rasterCoords, gRasterToWorld ).xyz - gCamPos ) );
     
     // Create a ray and sphere out of the hardcoded params.
-    Ray ray = { rayOrigin, rayDir, tMax };
+    Ray ray = { gCamPos, rayDir, tMax };
     Sphere sphere = { sphereOrigin, sphereRadius };
 
     // Colour the current pixel as blue if the sphere is hit, else black.

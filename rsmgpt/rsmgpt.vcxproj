@@ -152,6 +152,7 @@
     <ClInclude Include="..\src\d3dx12.h" />
     <ClInclude Include="..\src\DXSample.h" />
     <ClInclude Include="..\src\DXSampleHelper.h" />
+    <ClInclude Include="..\src\rsmgptCamera.h" />
     <ClInclude Include="..\src\rsmgptDefns.h" />
     <ClInclude Include="..\src\rsmgptEngine.h" />
     <ClInclude Include="..\src\rsmgptResourceBinding.h" />
@@ -159,6 +160,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\DXSample.cpp" />
+    <ClCompile Include="..\src\rsmgptCamera.cpp" />
     <ClCompile Include="..\src\rsmgptEngine.cpp" />
     <ClCompile Include="..\src\rsmgptResourceBinding.cpp" />
     <ClCompile Include="..\src\stdafx.cpp" />
