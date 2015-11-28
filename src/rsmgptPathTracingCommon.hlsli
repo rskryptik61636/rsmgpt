@@ -42,14 +42,20 @@ struct Ray
     float tMax; // Ray max intersection parameter.
 };
 
-#if 1
 // Sphere structure.
 struct Sphere
 {
     float3 o;   // Sphere origin.
     float  r;   // Sphere radius.
 };
-#endif // 0
+
+// Triangle structure.
+struct Triangle
+{
+    float3 v0, v1, v2;
+};
+
+//float EPSILON = 0.0001;
 
 // Quadratic equation solver.
 bool quadratic( in float A, in float B, in float C, out float t1, out float t2 )
@@ -93,7 +99,7 @@ bool quadratic( in float A, in float B, in float C, out float t1, out float t2 )
 }
 
 // Ray - sphere intersection test.
-void sphereIntersect( in Ray ray, /*in float radius,*/in Sphere sphere, out bool hit )
+bool sphereIntersect( in Ray ray, in Sphere sphere )
 {
     // Compute the coefficients for the quadratic equation of the sphere:
     // (sx - cx)^2 + (sy - cy)^2 + (sz - cz)^2 = r^2
@@ -115,23 +121,77 @@ void sphereIntersect( in Ray ray, /*in float radius,*/in Sphere sphere, out bool
     float t1, t2;
     if( !quadratic( A, B, C, t1, t2 ) )
     {
-        hit = false;
+        return false;
     }
     else
     {
         // Determine whether the sphere was intersected or not based on the values of the roots.
-        hit = true;
+        //hit = true;
         if( t1 > ray.tMax || t2 <= 0 )
-            hit = false;
+            return false;
 
         float thit = t1;
         if( t1 <= 0 )
         {
             thit = t2;
             if( thit > ray.tMax )
-                hit = false;
+                return false;
         }
     }    
 
     // TODO: Add intersection point computation here.
+
+    return true;
+}
+
+// Ray - triangle intersection.
+bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out float t, out float b1, out float b2 )
+{
+    // Compute the edge vectors for (v1 - v0) and (v2 - v0).
+    const float3 o = ray.o, d = ray.d, v0 = tri.v0, v1 = tri.v1, v2 = tri.v2;
+    const float3 e1 = v1 - v0, e2 = v2 - v0;
+
+    // Compute s1 = (d x e2).
+    const float3 s1 = cross( d, e2 );
+
+    // Go one of two ways depending on whether back facing triangles are being culled or not.
+    if( cullBackFacing )
+    {
+        // Compute the det = (e1.s1). Reject if < 0.
+        const float det = dot( e1, s1 );
+        if( det < 0.000001 )
+        {
+            return false;
+        }
+
+        // Compute s = o - v0.
+        const float3 s = o - v0;
+
+        // Compute b1 = s1.s and return if < 0 or > det.
+        b1 = dot( s1, s );
+        if( b1 < 0 || b1 > det )
+        {
+            return false;
+        }
+
+        // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
+        const float3 s2 = cross( s, e1 );
+        b2 = dot( s2, d );
+        if( b2 < 0 || ( b1 + b2 ) > det )
+        {
+            return false;
+        }
+
+        // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
+        const float invDet = 1.f / det;
+        t = dot( s2, e2 ) * invDet;
+        b1 *= invDet;
+        b2 *= invDet;
+    }
+    else
+    {
+
+    }
+
+    return true;
 }

@@ -3,6 +3,10 @@
 #include <iostream>
 #include <numeric>
 
+//#pragma push_macro("max")
+//#include <algorithm>
+//#pragma pop_macro("max")
+
 #pragma message("Linking against rsmgpt.lib")
 #pragma comment(lib, "rsmgpt.lib")
 
@@ -19,14 +23,18 @@ struct Ray
     float tMax; // Ray max intersection parameter.
 };
 
-#if 1
 // Sphere structure.
 struct Sphere
 {
     Vec3 o;   // Sphere origin.
     float  r;   // Sphere radius.
 };
-#endif // 0
+
+// Triangle structure.
+struct Triangle
+{
+    Vec3 v0, v1, v2;
+};
 
 // Quadratic equation solver.
 bool quadratic( const float A, const float B, const float C, float& t1, float& t2 )
@@ -44,14 +52,14 @@ bool quadratic( const float A, const float B, const float C, float& t1, float& t
     // b >= 0: t1 = (-b - disc) / 2a; t2 = 2c / (-b - disc)
     if( B < 0 )
     {
-        float q = -0.5 * ( B + disc );
+        float q = -0.5f * ( B + disc );
 
         t1 = C / q;
         t2 = q / A;
     }
     else
     {
-        float q = -0.5 * ( B - disc );
+        float q = -0.5f * ( B - disc );
 
         t1 = q / A;
         t2 = C / q;
@@ -66,6 +74,39 @@ bool quadratic( const float A, const float B, const float C, float& t1, float& t
     }
 
     return true;
+}
+
+// Taken from pbrt-v2.
+//template <typename T>
+int MaxDimension( const Vec3 &v )
+{
+    return ( v.x > v.y ) ? ( ( v.x > v.z ) ? 0 : 2 ) : ( ( v.y > v.z ) ? 1 : 2 );
+}
+
+// Taken from pbrt-v2.
+//template <typename T>
+Vec3 Abs( const Vec3 &v )
+{
+    return Vec3( std::abs( v.x ), std::abs( v.y ), std::abs( v.z ) );
+}
+
+Vec3 Permute( const Vec3 &v, int x, int y, int z )
+{
+    return Vec3(
+        ( x == 0 ) ? v.x : ( ( x == 1 ) ? v.y : v.z ),
+        ( y == 0 ) ? v.x : ( ( y == 1 ) ? v.y : v.z ),
+        ( z == 0 ) ? v.x : ( ( z == 1 ) ? v.y : v.z ) );
+}
+
+float MaxComponent( const Vec3 &v )
+{
+    return max( v.x, max( v.y, v.z ) );
+}
+
+#define MachineEpsilon std::numeric_limits<float>::epsilon() * 0.5f
+inline constexpr float gamma( int n )
+{
+    return ( n * MachineEpsilon ) / ( 1 - n * MachineEpsilon );
 }
 
 // Ray - sphere intersection test.
@@ -111,10 +152,209 @@ void sphereIntersect( const Ray& ray, /*in float radius,*/const Sphere& sphere, 
     // TODO: Add intersection point computation here.
 }
 
+// Ray - triangle intersection test v0 (Moller-Trumbore algo).
+void triangleIntersectV1( const Ray& ray, const Triangle& tri, bool& hit, float& t, float& b1, float& b2, const bool cullBackFacing = true )
+{
+    // Compute the edge vectors for (v1 - v0) and (v2 - v0).
+    static constexpr float eps( std::numeric_limits<float>::epsilon() );
+    const auto& o( ray.o ), d( ray.d ), v0( tri.v0 ), v1( tri.v1 ), v2( tri.v2 );
+    const Vec3 e1( v1 - v0 ), e2( v2 - v0 );
+
+    // Compute s1 = (d x e2).
+    const Vec3 s1( d.Cross( e2 ) );
+
+    // Go one of two ways depending on whether back facing triangles are being culled or not.
+    if( cullBackFacing )
+    {
+        // Compute the det = (e1.s1). Reject if < 0.
+        const float det( e1.Dot( s1 ) );
+        if( det < eps )
+        {
+            hit = false;
+            return;
+        }
+
+        // Compute s = o - v0.
+        const Vec3 s( o - v0 );// , s1( d.Cross( e2 ) ), s2( s.Cross( e1 ) );
+
+        // Compute b1 = s1.s and return if < 0 or > det.
+        b1 = s1.Dot( s );
+        if( b1 < 0 || b1 > det )
+        {
+            hit = false;
+            return;
+        }
+
+        // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
+        const Vec3 s2( s.Cross( e1 ) );
+        b2 = s2.Dot( d );
+        if( b2 < 0 || ( b1 + b2 ) > det )
+        {
+            hit = false;
+            return;
+        }
+
+        // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
+        const float invDet( 1.f / det );
+        t = s2.Dot( e2 ) * invDet;
+        b1 *= invDet;
+        b2 *= invDet;
+        hit = true;
+    }
+    else
+    {
+
+    }    
+}
+
+// Ray - triangle intersection test v1 (pbrt-v2 algo)
+bool triangleIntersectV2( const Ray& ray, const Triangle& tri, float& t, float& b0, float& b1, float& b2 )
+{
+    // Transform triangle vertices to ray coordinate space
+    const Vec3& p0( tri.v0 ), p1( tri.v1 ), p2( tri.v2 );
+
+    // Translate vertices based on ray origin
+    Vec3 p0t = p0 - ray.o;
+    Vec3 p1t = p1 - ray.o;
+    Vec3 p2t = p2 - ray.o;
+
+    // Permute components of triangle vertices and ray direction
+    int kz = MaxDimension( Abs( ray.d ) );
+    int kx = kz + 1;
+    if( kx == 3 ) kx = 0;
+    int ky = kx + 1;
+    if( ky == 3 ) ky = 0;
+    Vec3 d = Permute( ray.d, kx, ky, kz );
+    p0t = Permute( p0t, kx, ky, kz );
+    p1t = Permute( p1t, kx, ky, kz );
+    p2t = Permute( p2t, kx, ky, kz );
+
+    // Apply shear transformation to translated vertex positions
+    float Sx = -d.x / d.z;
+    float Sy = -d.y / d.z;
+    float Sz = 1.f / d.z;
+    p0t.x += Sx * p0t.z;
+    p0t.y += Sy * p0t.z;
+    p1t.x += Sx * p1t.z;
+    p1t.y += Sy * p1t.z;
+    p2t.x += Sx * p2t.z;
+    p2t.y += Sy * p2t.z;
+
+    // Compute edge function coefficients _e0_, _e1_, and _e2_
+    float ea0 = p1t.y - p2t.y;
+    float eb0 = p2t.x - p1t.x;
+    float e0 = -( ea0*( p1t.x + p2t.x ) + eb0*( p1t.y + p2t.y ) ) / 2.f; //p1t.x * p2t.y - p1t.y * p2t.x;
+
+    float ea1 = p2t.y - p0t.y;
+    float eb1 = p0t.x - p2t.x;
+    float e1 = -( ea1*( p2t.x + p0t.x ) + eb1*( p2t.y + p0t.y ) ) / 2.f; //p2t.x * p0t.y - p2t.y * p0t.x;
+
+    float ea2 = p0t.y - p1t.y;
+    float eb2 = p1t.x - p0t.x;
+    float e2 = -( ea2*( p0t.x + p1t.x ) + eb2*( p0t.y + p1t.y ) ) / 2.f; //p0t.x * p1t.y - p0t.y * p1t.x;
+
+    // No double precision for now.
+#if 0
+    // Compute edge function coefficients _e0_, _e1_, and _e2_
+    float e0 = p1t.x * p2t.y - p1t.y * p2t.x;
+    float e1 = p2t.x * p0t.y - p2t.y * p0t.x;
+    float e2 = p0t.x * p1t.y - p0t.y * p1t.x;
+
+    // Fall back to double precision test at triangle edges
+    if( sizeof( float ) == sizeof( float ) &&
+        ( e0 == 0.0f || e1 == 0.0f || e2 == 0.0f ) )
+    {
+        double p2txp1ty = (double)p2t.x * (double)p1t.y;
+        double p2typ1tx = (double)p2t.y * (double)p1t.x;
+        e0 = (float)( p2typ1tx - p2txp1ty );
+        double p0txp2ty = (double)p0t.x * (double)p2t.y;
+        double p0typ2tx = (double)p0t.y * (double)p2t.x;
+        e1 = (float)( p0typ2tx - p0txp2ty );
+        double p1txp0ty = (double)p1t.x * (double)p0t.y;
+        double p1typ0tx = (double)p1t.y * (double)p0t.x;
+        e2 = (float)( p1typ0tx - p1txp0ty );
+    }
+#endif // 0
+
+
+    // Perform triangle edge and determinant tests
+    if( ( e0 < 0 || e1 < 0 || e2 < 0 ) && ( e0 > 0 || e1 > 0 || e2 > 0 ) )
+        return false;
+    float det = e0 + e1 + e2;
+    if( det == 0 ) return false;
+
+    // Compute scaled hit distance to triangle and test against ray $t$ range
+    p0t.z *= Sz;
+    p1t.z *= Sz;
+    p2t.z *= Sz;
+    float tScaled = e0 * p0t.z + e1 * p1t.z + e2 * p2t.z;
+    if( det < 0 && ( tScaled >= 0 || tScaled < ray.tMax * det ) )
+        return false;
+    else if( det > 0 && ( tScaled <= 0 || tScaled > ray.tMax * det ) )
+        return false;
+
+    // Compute barycentric coordinates and $t$ value for triangle intersection
+    float invDet = 1 / det;
+    b0 = e0 * invDet;
+    b1 = e1 * invDet;
+    b2 = e2 * invDet;
+    t = tScaled * invDet;
+
+    // Ensure that computed triangle $t$ is conservatively greater than zero
+
+    // Compute $\delta_z$ term for triangle $t$ error bounds
+    float maxZt = MaxComponent( Abs( Vec3( p0t.z, p1t.z, p2t.z ) ) );
+    float deltaZ = gamma( 3 ) * maxZt;
+
+    // Compute $\delta_x$ and $\delta_y$ terms for triangle $t$ error bounds
+    float maxXt = MaxComponent( Abs( Vec3( p0t.x, p1t.x, p2t.x ) ) );
+    float maxYt = MaxComponent( Abs( Vec3( p0t.y, p1t.y, p2t.y ) ) );
+    float deltaX = gamma( 5 ) * ( maxXt + maxZt );
+    float deltaY = gamma( 5 ) * ( maxYt + maxZt );
+
+    // Compute $\delta_e$ term for triangle $t$ error bounds
+    float deltaE =
+        2 * ( gamma( 2 ) * maxXt * maxYt + deltaY * maxXt + deltaX * maxYt );
+
+    // Compute $\delta_t$ term for triangle $t$ error bounds and check _t_
+    float maxE = MaxComponent( Abs( Vec3( e0, e1, e2 ) ) );
+    float deltaT = 3 *
+        ( gamma( 3 ) * maxE * maxZt + deltaE * maxZt + deltaZ * maxE ) *
+        std::abs( invDet );
+    if( t <= deltaT ) return false;
+
+    return true;
+}
+
 int main( int argc, char *argv[] )
 {
+    //// Ray triangle coord system test.
+    //const Vec3 p0( 0, 0, 0 ), p1( 2, 5, 0 ), p2( 5, 2, 0 );
+    //const float b1( 0.25 ), b2( 0.75 );
+    //Vec3 u( b1 * ( p1 - p0 ) ), v( b2 * ( p2 - p0 ) );
+    //u.Normalize();
+    //v.Normalize();
+
+    // Test ray triangle intersection.
+    //const Ray ray = { Vec3( 1, 1, 0 ), Vec3( 0, 0, -1 ), std::numeric_limits<float>::infinity() };
+    const Ray ray = { Vec3( 0, 0, 0 ), Vec3( -0.780868800, 0.000000000, 0.624695100 ), std::numeric_limits<float>::infinity() };
+    //const Triangle tri1 = { Vec3( 0, 0, -2 ), Vec3( 4, 0, -2 ), Vec3( 2, 2, -2 ) };
+    const Triangle tri1 = { Vec3( 6, 0, 3 ), Vec3( 8, 2, 3 ), Vec3( 10, 0, 3 ) };
+    const Triangle tri2 = { tri1.v0, tri1.v2, tri1.v1 };
+    bool hit;
+    float t( 0.f ), b0( 0.f ), b1( 0.f ), b2( 0.f );
+
+    triangleIntersectV1( ray, tri1, hit, t, b1, b2 );
+    //hit = triangleIntersectV2( ray, tri1, t, b0, b1, b2 );
+    std::cout << "tri1 is " << ( hit ? "hit" : "not hit" ) << std::endl;
+
+    triangleIntersectV1( ray, tri2, hit, t, b1, b2 );
+    //hit = triangleIntersectV2( ray, tri2, t, b0, b1, b2 );
+    std::cout << "tri2 is " << ( hit ? "hit" : "not hit" ) << std::endl;
+
+#if 0
     // Test ray sphere intersection.
-    // TODO: Testing out camera transforms. Remove when done testing.
+// TODO: Testing out camera transforms. Remove when done testing.
     const float m_width( 1280 ), m_height( 1024 ), fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );
     const float
         fov( .5f * XM_PI /*90*/ ),
@@ -142,7 +382,7 @@ int main( int argc, char *argv[] )
         Mat4::CreateTranslation( -screenxmin, -screenymin, 0.f ) *  // Translate to top left corner of viewport.
         Mat4::CreateScale( 1.f / ( screenxmax - screenxmin ), 1.f / ( screenymax - screenymin ), 1.f ) *    // Transform to NDC [0,1].
         Mat4::CreateScale( fWidth, fHeight, 1.f ) );    // Transforms to raster coords [0,width/height-1]
-    const Mat4 rasterToWorld( 
+    const Mat4 rasterToWorld(
         ( worldToCamera * cameraToScreen * screenToRaster ).Invert()
         /*worldToCamera.Invert() * cameraToScreen.Invert() * screenToRaster.Invert()*/ );    // Inverse transform from raster space to camera space.
 
@@ -162,9 +402,11 @@ int main( int argc, char *argv[] )
     id.Normalize();
 
     // Create a ray and sphere and check if they intersect.
-    Ray ray = { Vec3( 0, 0, 0 ), Vec3( res.x, res.y, res.z ), static_cast<float>( (std::numeric_limits<unsigned>::max)() ) };
+    Ray ray = { Vec3( 0, 0, 0 ), Vec3( res.x, res.y, res.z ), static_cast<float>( ( std::numeric_limits<unsigned>::max )( ) ) };
     Sphere sphere = { Vec3( 0, 0, 3 ), 1 };
     bool hit;
     sphereIntersect( ray, sphere, hit );
     std::cout << ( hit ? "Yay!" : "Boo!" ) << std::endl;
+#endif // 0
+
 }

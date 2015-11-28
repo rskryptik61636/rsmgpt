@@ -85,7 +85,7 @@ namespace rsmgpt
             Mat4    gRasterToWorld; // Raster to world space transformation matrix.
             Vec3    gCamPos;        // Camera position.
 
-            float   pad[ 19 ];         // Constant buffers are 256 byte aligned.
+            float   pad[ 45 ];         // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
         // Graphics root signature parameter offsets.

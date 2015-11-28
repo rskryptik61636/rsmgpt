@@ -111,13 +111,31 @@ namespace rsmgpt
         ComPtr<IDXGIFactory4> factory;
         ThrowIfFailed( CreateDXGIFactory1( IID_PPV_ARGS( &factory ) ) );
 
-        ThrowIfFailed( 
-            D3D12CreateDevice(
-                nullptr,                    // Video adapter. nullptr implies the default adapter.
-                D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
-                IID_PPV_ARGS( &m_device )   // D3D device object.
-                ) );
+        // TODO: Remove when done testing.
+        //m_useWarpDevice = true;
 
+        if( m_useWarpDevice )
+        {
+            ComPtr<IDXGIAdapter> warpAdapter;
+            ThrowIfFailed( factory->EnumWarpAdapter( IID_PPV_ARGS( &warpAdapter ) ) );
+
+            ThrowIfFailed( 
+                D3D12CreateDevice(
+                    warpAdapter.Get(),
+                    D3D_FEATURE_LEVEL_11_0,
+                    IID_PPV_ARGS( &m_device )
+                    ) );
+        }
+        else
+        {
+            ThrowIfFailed(
+                D3D12CreateDevice(
+                    nullptr,                    // Video adapter. nullptr implies the default adapter.
+                    D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
+                    IID_PPV_ARGS( &m_device )   // D3D device object.
+                    ) );
+        }
+        
         // Create the render and compute command queues that we will be using.
         D3D12_COMMAND_QUEUE_DESC queueDesc = {};
         queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
