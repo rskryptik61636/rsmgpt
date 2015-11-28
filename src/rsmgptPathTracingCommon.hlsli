@@ -159,7 +159,7 @@ bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out
     {
         // Compute the det = (e1.s1). Reject if < 0.
         const float det = dot( e1, s1 );
-        if( det < 0.000001 )
+        if( det < 0.000001f )
         {
             return false;
         }
@@ -169,7 +169,7 @@ bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out
 
         // Compute b1 = s1.s and return if < 0 or > det.
         b1 = dot( s1, s );
-        if( b1 < 0 || b1 > det )
+        if( b1 < 0.f || b1 > det )
         {
             return false;
         }
@@ -177,7 +177,7 @@ bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out
         // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
         const float3 s2 = cross( s, e1 );
         b2 = dot( s2, d );
-        if( b2 < 0 || ( b1 + b2 ) > det )
+        if( b2 < 0.f || ( b1 + b2 ) > det )
         {
             return false;
         }
@@ -190,7 +190,34 @@ bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out
     }
     else
     {
+        // Compute the det = (e1.s1). Reject if < 0.
+        const float det = dot( e1, s1 );
+        if( det > -0.000001f && det < 0.000001f )
+        {
+            return false;
+        }
 
+        // Compute s = o - v0.
+        const float3 s = o - v0;
+
+        // Compute b1 = s1.s and return if < 0 or > det.
+        const float invDet = 1.f / det;
+        b1 = dot( s1, s ) * invDet;
+        if( b1 < 0.f || b1 > 1.f )
+        {
+            return false;
+        }
+
+        // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
+        const float3 s2 = cross( s, e1 );
+        b2 = dot( s2, d ) * invDet;
+        if( b2 < 0 || ( b1 + b2 ) > 1.f )
+        {
+            return false;
+        }
+
+        // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
+        t = dot( s2, e2 ) * invDet;
     }
 
     return true;
