@@ -428,7 +428,7 @@ namespace rsmgpt
                 lensRadius( 1.f ),
                 fWidth( static_cast<float>( m_width ) ), 
                 fHeight( static_cast<float>( m_height ) ),
-                fov( .5f * XM_PI /*90*/ ),
+                fov( .25f * XM_PI /*90*/ ),
                 aspectRatio( fWidth / fHeight ),
                 nearPlane( /*1e-2f*/ 1.f ),
                 farPlane( 1000.f ),
