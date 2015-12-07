@@ -22,23 +22,17 @@
 
 #pragma once
 
-#include <SimpleMath.h>
-#include <filesystem>
+#include "stdafx.h"
+#include "rsmgptDefns.h"
 
 namespace rsmgpt
 {
-    // Math typedefs.
-    namespace Math = DirectX::SimpleMath;
-    typedef Math::Vector2 Vec2;
-    typedef Math::Vector3 Vec3;
-    typedef Math::Vector4 Vec4;
-    typedef Vec4 Color;
-    typedef Math::Matrix Mat4;
-    typedef Math::Plane Plane;
-
-    // TODO: Check if using these namespaces can lead to any conflicts.
-    using namespace Microsoft::WRL;
-    using namespace DirectX;
-    using path = std::tr2::sys::path;
-
-}   // end of namespace rsmgpt
+    void createBuffer(
+        ID3D12Device* pDevice,
+        ID3D12GraphicsCommandList* pCommandList,
+        ComPtr<ID3D12Resource>& pResource,
+        const unsigned dataSizeInBytes,
+        ComPtr<ID3D12Resource>& pUpload = ComPtr<ID3D12Resource>(),
+        const void* pData = nullptr
+        );
+}

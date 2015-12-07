@@ -155,14 +155,18 @@
     <ClInclude Include="..\src\rsmgptCamera.h" />
     <ClInclude Include="..\src\rsmgptDefns.h" />
     <ClInclude Include="..\src\rsmgptEngine.h" />
+    <ClInclude Include="..\src\rsmgptModel.h" />
     <ClInclude Include="..\src\rsmgptResourceBinding.h" />
+    <ClInclude Include="..\src\rsmgptResources.h" />
     <ClInclude Include="..\src\stdafx.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\DXSample.cpp" />
     <ClCompile Include="..\src\rsmgptCamera.cpp" />
     <ClCompile Include="..\src\rsmgptEngine.cpp" />
+    <ClCompile Include="..\src\rsmgptModel.cpp" />
     <ClCompile Include="..\src\rsmgptResourceBinding.cpp" />
+    <ClCompile Include="..\src\rsmgptResources.cpp" />
     <ClCompile Include="..\src\stdafx.cpp" />
   </ItemGroup>
   <ItemGroup>

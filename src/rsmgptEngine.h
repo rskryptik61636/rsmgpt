@@ -28,7 +28,6 @@
 #include "rsmgptCamera.h"
 
 #include <array>
-#include <filesystem>
 
 #if 0
 #include <GameCore.h>
@@ -38,10 +37,8 @@
 #include <BufferManager.h>  
 #endif // 0
 
-namespace rsmgpt 
-{
-	using path = std::tr2::sys::path;
-
+namespace rsmgpt {
+	
 #if 0
     using namespace GameCore;
     using namespace Math;

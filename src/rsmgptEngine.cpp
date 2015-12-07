@@ -23,6 +23,7 @@
 #include "stdafx.h"
 #include "rsmgptEngine.h"
 #include "rsmgptGlobals.h"
+#include "rsmgptResources.h"
 
 // Include shader headers.
 #include <rsmgptPathTracingKernelCS.h>
@@ -332,47 +333,24 @@ namespace rsmgpt
                 { { -1.f, 3.0f, 0.0f }, { 0.f, 2.f } },   // Top left
                 { { 3.0f, -1.f, 0.0f }, { 2.f, 0.f } }    // Bottom right
             };
-
             const UINT vertexBufferSize = sizeof( triangleVertices );
 
-            // Create a default usage resource for the vertex buffer which will primarily reside on the GPU.
-            ThrowIfFailed( 
-                m_device->CreateCommittedResource(
-                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
-                    D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
-                    &CD3DX12_RESOURCE_DESC::Buffer( vertexBufferSize ),     // Resource description. Buffer of 'vertexBufferSize' bytes.
-                    D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the vertex data
-                                                                            // will be copied to it from the upload vertex buffer.
-                    nullptr,                                                // No clear value.
-                    IID_PPV_ARGS( &m_vertexBuffer ) ) );                    // Resource (output).
-
-            // Create an upload resource for the vertex buffer which will primarily act as a staging buffer
-            // to upload the vertex data to the default usage vertex buffer.
-            ThrowIfFailed( m_device->CreateCommittedResource(
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ), // Upload heap.
-                D3D12_HEAP_FLAG_NONE,
-                &CD3DX12_RESOURCE_DESC::Buffer( vertexBufferSize ),
-                D3D12_RESOURCE_STATE_GENERIC_READ,                  // The vertex data will be read from this heap.
-                nullptr,
-                IID_PPV_ARGS( &vertexBufferUpload ) ) );
-
-            // Copy data to the intermediate upload heap and then schedule a copy
-            // from the upload heap to the vertex buffer.
-            D3D12_SUBRESOURCE_DATA vertexData = {};
-            vertexData.pData = reinterpret_cast<UINT8*>( triangleVertices );
-            vertexData.RowPitch = vertexBufferSize;
-            vertexData.SlicePitch = vertexData.RowPitch;
-
-            // Copy vertexData to m_vertexBuffer via the staging resource vertexBufferUpload.
-            UpdateSubresources<1>( m_commandList.Get(), m_vertexBuffer.Get(), vertexBufferUpload.Get(), 0, 0, 1, &vertexData );
-
+            // Create the vertex buffer resource.
+            createBuffer(
+                m_device.Get(),
+                m_commandList.Get(),
+                m_vertexBuffer,
+                vertexBufferSize,
+                vertexBufferUpload,
+                reinterpret_cast<void*>( triangleVertices ) );
+            
             // Add a resource barrier to indicate that the vertex buffer is transitioning from a copy dest to being used as a vertex buffer.
             m_commandList->ResourceBarrier( 1, &CD3DX12_RESOURCE_BARRIER::Transition( m_vertexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER ) );
 
             // Initialize the vertex buffer view.
             m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
             m_vertexBufferView.StrideInBytes = sizeof( Vertex );
-            m_vertexBufferView.SizeInBytes = sizeof( triangleVertices );
+            m_vertexBufferView.SizeInBytes = vertexBufferSize;
         }
 
         // Create the depth stencil view. (TODO: See if we can do way with this.)
