@@ -33,7 +33,8 @@ namespace rsmgpt
         const unsigned int
         uiImportOptions /*= aiProcess_MakeLeftHanded | aiProcess_FlipWindingOrder |
         aiProcess_FlipUVs | aiProcessPreset_TargetRealtime_Quality*/ ) :
-        m_modelPath(modelPath)
+        m_modelPath(modelPath),
+        m_numFaces( 0 )
     {
         // Create an importer and read the model.
         Assimp::Importer importer;
@@ -45,19 +46,36 @@ namespace rsmgpt
         m_pModel.reset( importer.GetOrphanedScene() );	
 
         // TODO: Need to implement loading of textures.
+
+        // TODO: Vertex and index loading needs to be updated for multiple meshes.
                                                         
         // Initialize the vertex and index lists.
         UINT currVertexOffset( 0 ), currIndexOffset( 0 );
         m_modelMeshes.resize( m_pModel->mNumMeshes );
+
+        // Size m_modelIndices to the appropriate length.
+        auto nVertices( 0 ), nIndices( 0 );
         for( unsigned int i = 0; i < m_pModel->mNumMeshes; ++i )
+        {
+            auto& pCurrMesh = m_pModel->mMeshes[ i ];
+            nVertices += pCurrMesh->mNumVertices;
+            for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
+            {
+                nIndices += pCurrMesh->mFaces[ j ].mNumIndices;
+            }
+        }
+        m_modelVertices.resize( nVertices );
+        m_modelIndices.resize( nIndices );
+
+        for( unsigned int i = 0, vert = 0, indx = 0; i < m_pModel->mNumMeshes; ++i )
         {
             // Add all the vertices of the current mesh.
             const aiMesh *pCurrMesh = m_pModel->mMeshes[ i ];
-            m_modelVertices.resize( pCurrMesh->mNumVertices );
+            //m_modelVertices.resize( pCurrMesh->mNumVertices );
             for( unsigned int j = 0; j < pCurrMesh->mNumVertices; ++j )
             {
                 //ModelVertex currVertex;
-                auto& currVertex = m_modelVertices[ j ];
+                auto& currVertex = m_modelVertices[ vert++ ];
                 currVertex.position = Vec3( pCurrMesh->mVertices[ j ].x, pCurrMesh->mVertices[ j ].y, pCurrMesh->mVertices[ j ].z );
 
                 currVertex.tangent = ( pCurrMesh->HasTangentsAndBitangents() ?
@@ -95,20 +113,15 @@ namespace rsmgpt
             m_modelMeshes[ i ].vertexStart = currVertexOffset;
             currVertexOffset += m_modelMeshes[ i ].vertexCount;
 
-            // Size m_modelIndices to the appropriate length.
-            auto nIndices( 0 );
-            for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
-            {
-                nIndices += pCurrMesh->mFaces[ j ].mNumIndices;
-            }
-            m_modelIndices.resize( nIndices );
+            // Set the no. of faces based of the current mesh.
+            m_numFaces += pCurrMesh->mNumFaces;
 
             // Add all the face indices of the current mesh.
-            for( unsigned int j = 0, l = 0; j < pCurrMesh->mNumFaces; ++j )
+            for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
             {
                 const auto& currFace = pCurrMesh->mFaces[ j ];
                 for( unsigned int k = 0; k < currFace.mNumIndices; ++k )
-                    m_modelIndices[ l++ ] = currFace.mIndices[ k ];
+                    m_modelIndices[ indx++ ] = currFace.mIndices[ k ];
                     //m_modelIndices.push_back( currFace.mIndices[ k ] );
             }
 
@@ -127,13 +140,12 @@ namespace rsmgpt
         // @TODO: add implementation here
 
         // Create the vertex and index buffers.
-        ComPtr<ID3D12Resource> pVertexUpload, pIndexUpload;
         createBuffer(
             pDevice,
             pCommandList,
             m_pModelVertexBuffer,
             m_modelVertices.size() * sizeof( ModelVertex ),
-            pVertexUpload,
+            m_pModelVertexUpload,
             m_modelVertices.data() );
 
         createBuffer(
@@ -141,8 +153,23 @@ namespace rsmgpt
             pCommandList,
             m_pModelIndexBuffer,
             m_modelIndices.size() * sizeof( unsigned int ),
-            pIndexUpload,
+            m_pModelIndexUpload,
             m_modelIndices.data() );
+
+        // Add resource barriers to indicate that the vertex and index buffers are transitioning from copy dests to srv-s.
+        m_srvBarriers = {
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_pModelVertexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE ),
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_pModelIndexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE )
+        };
+        pCommandList->ResourceBarrier( 
+            static_cast<UINT>( m_srvBarriers.size() ), 
+            m_srvBarriers.data() );
     }
 
     // Recursive function which constructs the model's node tree.

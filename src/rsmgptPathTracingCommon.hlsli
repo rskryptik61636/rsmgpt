@@ -55,6 +55,17 @@ struct Triangle
     float3 v0, v1, v2;
 };
 
+// Model vertex structure.
+struct ModelVertex
+{
+    float3 position;
+    float3 normal;
+    float2 texCoord;
+    float3 tangent;
+    float3 binormal;
+    float4 color;
+};
+
 //float EPSILON = 0.0001;
 
 // Quadratic equation solver.

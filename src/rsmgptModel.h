@@ -75,26 +75,38 @@ public:
     // Accessor function for the model's root node. Required to traverse the node tree in order to draw the model.
     const ModelNode& rootNode() const { return m_modelRootNode; }
 
+    // Accessor function for the model's vertex and index buffer resources.
+    ID3D12Resource* vertexBuffer() const { return m_pModelVertexBuffer.Get(); }
+    ID3D12Resource* indexBuffer() const { return m_pModelIndexBuffer.Get(); }
+
+    // Accessor functions for the no. of vertices, indices and triangle faces.
+    std::size_t numVertices() const { return m_modelVertices.size(); }
+    std::size_t numIndices() const { return m_modelIndices.size(); }
+    std::size_t numFaces() const { return m_numFaces; }
+
 private:
 
     // Recursive function which constructs the model's node tree.
-    void recursiveNodeConstructor( aiNode *pCurrNode, ModelNode &currNode );
+    void recursiveNodeConstructor( aiNode* pCurrNode, ModelNode& currNode );
 
     // Model path
     path m_modelPath;
 
     // Model
     std::unique_ptr<const aiScene> m_pModel;
-    /*const aiScene *m_pModel;*/
-
+    
     // Model textures
     //std::map<std::string, ShaderResourceViewPtr> m_modelDiffuseTextures, m_modelSpecularTextures, m_modelNormalTextures;
 
     // Model vertices and indices.
     std::vector<ModelVertex> m_modelVertices;
     std::vector<unsigned int> m_modelIndices;
+    unsigned int m_numFaces;
     ComPtr<ID3D12Resource> m_pModelVertexBuffer;
+    ComPtr<ID3D12Resource> m_pModelVertexUpload;
     ComPtr<ID3D12Resource> m_pModelIndexBuffer;
+    ComPtr<ID3D12Resource> m_pModelIndexUpload;
+    std::array<D3D12_RESOURCE_BARRIER, 2> m_srvBarriers;
 
     // Model meshes
     std::vector<ModelMesh> m_modelMeshes;
@@ -102,5 +114,6 @@ private:
     // Model root node
     ModelNode m_modelRootNode;
 };
+typedef std::unique_ptr<Model> ModelPtr;
 
 };  // end of namespace rsmgpt

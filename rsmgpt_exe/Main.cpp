@@ -31,6 +31,18 @@ using namespace rsmgpt;
 #pragma message("Linking against DirectXTK.lib")
 #pragma comment(lib, "DirectXTK.lib")
 
+#ifdef _DEBUG
+
+#pragma message("Linking against assimp-vc130-mtd.lib")
+#pragma comment(lib, "assimp-vc130-mtd.lib")
+
+#else
+
+#pragma message("Linking against assimp-vc130-mt.lib")
+#pragma comment(lib, "assimp-vc130-mt.lib")
+
+#endif  // _DEBUG
+
 #if 0
 #pragma message("Linking against Core.lib")
 #pragma comment(lib, "Core.lib")

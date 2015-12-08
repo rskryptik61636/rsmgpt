@@ -31,7 +31,7 @@ namespace rsmgpt
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
         ComPtr<ID3D12Resource>& pResource,
-        const unsigned dataSizeInBytes,
+        std::size_t dataSizeInBytes,
         ComPtr<ID3D12Resource>& pUpload = ComPtr<ID3D12Resource>(),
         const void* pData = nullptr
         );

@@ -208,7 +208,7 @@ namespace rsmgpt
 
             UINT nDescriptors( 1 ), baseShaderRegister( 0 );
             CD3DX12_DESCRIPTOR_RANGE srvOutput( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, nDescriptors, baseShaderRegister );
-            m_gfxRootSignature[ SrvTable ].InitAsDescriptorTable( 1, &srvOutput, D3D12_SHADER_VISIBILITY_PIXEL );
+            m_gfxRootSignature[ GfxSrvTable ].InitAsDescriptorTable( 1, &srvOutput, D3D12_SHADER_VISIBILITY_PIXEL );
             
             // Create the static sampler desc for the point sampler in rsmgptPathTracingOutputPS.
             CD3DX12_STATIC_SAMPLER_DESC psSamplerDesc =
@@ -235,9 +235,13 @@ namespace rsmgpt
             m_computeRootSignature.reset( ComputeRootParametersCount, 0 );
             m_computeRootSignature[ CbvCbPerFrame ].InitAsConstantBufferView( 0 );
 
-            // The second compute root parameter is a table to the render output UAVs.
+            // The second compute root parameter is a table to the model vertex and index buffer SRVs.
+            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0 );
+            m_computeRootSignature[ ComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
+
+            // The third compute root parameter is a table to the render output UAVs.
             CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0 );
-            m_computeRootSignature[ UavTable ].InitAsDescriptorTable( 1, &uavOutput );
+            m_computeRootSignature[ ComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
             m_computeRootSignature.finalize( m_device.Get() );
         }
 
@@ -345,7 +349,12 @@ namespace rsmgpt
                 reinterpret_cast<void*>( triangleVertices ) );
             
             // Add a resource barrier to indicate that the vertex buffer is transitioning from a copy dest to being used as a vertex buffer.
-            m_commandList->ResourceBarrier( 1, &CD3DX12_RESOURCE_BARRIER::Transition( m_vertexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER ) );
+            m_commandList->ResourceBarrier( 
+                1, 
+                &CD3DX12_RESOURCE_BARRIER::Transition( 
+                    m_vertexBuffer.Get(), 
+                    D3D12_RESOURCE_STATE_COPY_DEST, 
+                    D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER ) );
 
             // Initialize the vertex buffer view.
             m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
@@ -416,7 +425,7 @@ namespace rsmgpt
                 screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
-            const Vec3 eye( 0, 0, 0 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+            const Vec3 eye( 0, 0, -10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
             m_pCamera.reset(
                 new PerspectiveCamera(
                     eye,
@@ -482,9 +491,29 @@ namespace rsmgpt
 
             // Map the constant buffers. We don't unmap this until the app closes.
             // Keeping things mapped for the lifetime of the resource is okay.
-            ThrowIfFailed( m_constantBuffer->Map( 0, nullptr, reinterpret_cast<void**>( &m_pCbvDataBegin ) ) );
-            //memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );   // This will be updated at runtime.
-                        
+            ThrowIfFailed( m_constantBuffer->Map( 0, nullptr, reinterpret_cast<void**>( &m_pCbvDataBegin ) ) );                        
+        }
+
+        // Load the test model.
+        {
+            const path modelPath( "N:\\rsmgpt\\models\\test1.obj" );
+            m_pModel.reset( new Model( modelPath, m_device.Get(), m_commandList.Get() ) );
+
+            // Create SRVs for the model's vertex and index buffers.
+            D3D12_SHADER_RESOURCE_VIEW_DESC vbDesc;
+            vbDesc.Format = DXGI_FORMAT_UNKNOWN;
+            vbDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+            vbDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            vbDesc.Buffer.FirstElement = 0;
+            vbDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+            vbDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->numVertices() );
+            vbDesc.Buffer.StructureByteStride = sizeof( ModelVertex );
+            m_pCsuHeap->addSRV( m_pModel->vertexBuffer(), &vbDesc, "gVertexBuffer" );
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC ibDesc( vbDesc );
+            ibDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->numIndices() );
+            ibDesc.Buffer.StructureByteStride = sizeof( unsigned int );
+            m_pCsuHeap->addSRV( m_pModel->indexBuffer(), &ibDesc, "gIndexBuffer" );
         }
 
         {
@@ -612,12 +641,16 @@ namespace rsmgpt
         // Update m_cbPerFrame.
         m_cbPerFrame.gRasterToWorld = m_pCamera->rasterToWorld().Transpose();
         m_cbPerFrame.gCamPos = m_pCamera->eyePosW();
+        m_cbPerFrame.gNumFaces = static_cast<unsigned>( m_pModel->numFaces() );
         memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );   // This will be updated at runtime.
         
         // Set the compute pipeline bindings.
         m_computeCommandList->SetComputeRootConstantBufferView( CbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
         m_computeCommandList->SetComputeRootDescriptorTable(
-            UavTable,
+            ComputeSrvTable,
+            m_pCsuHeap->getGPUHandle( "gVertexBuffer" ) );  // Set the SRV table.
+        m_computeCommandList->SetComputeRootDescriptorTable(
+            ComputeUavTable,
             m_pCsuHeap->getGPUHandle( "gOutput" ) );    // Set the UAV table.
 
         // Dispatch enough thread groups to cover the entire screen.
@@ -669,7 +702,7 @@ namespace rsmgpt
 
             // Bind the path tracer output SRV to the graphics pipeline.
             m_commandList->SetGraphicsRootDescriptorTable(
-                SrvTable,
+                GfxSrvTable,
                 m_pCsuHeap->getGPUHandle( "gptOutput" ) ); // Set the UAV table.
 
             // Add a barrier indicating that the path tracer output is going to be used as an SRV.

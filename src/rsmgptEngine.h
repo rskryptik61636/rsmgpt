@@ -26,6 +26,7 @@
 #include "rsmgptDefns.h"
 #include "rsmgptResourceBinding.h"
 #include "rsmgptCamera.h"
+#include "rsmgptModel.h"
 
 #include <array>
 
@@ -74,21 +75,17 @@ namespace rsmgpt {
         // Per frame constants.
         struct ConstantBufferData
         {
-            // TODO: We probably don't need these anymore.
-            //Vec3    gCamPos;            // Camera position.
-            //float   gCamAspectRatio;    // Camera aspect ratio.
-            //Vec3    gCamDir;            // Camera direction.
+            Mat4        gRasterToWorld; // Raster to world space transformation matrix.
+            Vec3        gCamPos;        // Camera position.
+            unsigned    gNumFaces;      // No. of triangle faces.
 
-            Mat4    gRasterToWorld; // Raster to world space transformation matrix.
-            Vec3    gCamPos;        // Camera position.
-
-            float   pad[ 45 ];         // Constant buffers are 256 byte aligned.
+            float   pad[ 44 ];         // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
         // Graphics root signature parameter offsets.
         enum GraphicsRootParameters
         {
-            SrvTable,                        // SRV to the path tracer's render target
+            GfxSrvTable,                        // SRV to the path tracer's render target
             GraphicsRootParametersCount
         };
 
@@ -96,17 +93,19 @@ namespace rsmgpt {
         enum ComputeRootParameters
         {
             CbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
-            UavTable,                   // Uav for the path tracing output to be rendered.    
+            ComputeSrvTable,            // Srvs for the vertex and index structured buffers.
+            ComputeUavTable,            // Uav for the path tracing output to be rendered.    
             ComputeRootParametersCount
         };
 
         // CBV/SRV/UAV desciptor heap offsets.
         enum HeapOffsets
         {
-            CbvOffset = 0,                                      // Path tracing kernel constant buffer.
-            UavOffset = CbvOffset + 1,                          // Path tracing kernel render output UAV.
-            SrvOffset = UavOffset + 1,                          // Path tracing kernel render output SRV (used to finally display the rendered output).
-            CbvSrvUavDescriptorCountPerFrame = SrvOffset + 1
+            ComputeCbvOffset = 0,                                       // Path tracing kernel constant buffer.
+            ComputeSrvOffset = ComputeCbvOffset + 1,                    // Path tracing kernel vertex and index buffer SRVs.
+            ComputeUavOffset = ComputeSrvOffset + 2,                    // Path tracing kernel render output UAV.
+            GfxSrvOffset = ComputeUavOffset + 1,                        // Path tracing kernel render output SRV (used to finally display the rendered output).
+            CbvSrvUavDescriptorCountPerFrame = GfxSrvOffset + 1
         };
 
         // Each triangle gets its own constant buffer per frame.
@@ -147,6 +146,7 @@ namespace rsmgpt {
         ComPtr<ID3D12Resource> m_depthStencil;
         ComPtr<ID3D12Resource> m_pathTracerOutput;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+        ModelPtr m_pModel;
 
         // Camera object.
         PerspectiveCameraPtr m_pCamera;
