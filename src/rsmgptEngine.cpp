@@ -462,8 +462,6 @@ namespace rsmgpt
                 Mat4::CreateScale( 1.f / ( screenxmax - screenxmin ), 1.f / ( screenymax - screenymin ), 1.f ) *    // Transform to NDC [0,1].
                 Mat4::CreateScale( fWidth, fHeight, 1.f ) );    // Transforms to raster coords [0,width/height-1]
             const Mat4 rasterToWorld( ( worldToCamera * cameraToScreen * screenToRaster ).Invert() );    // Inverse transform from raster space to camera space.  
-#endif // 0
-
 
             // TODO: Remove when done testing.
             //const Mat4 rasterToWorld( /*screenToRaster.Invert()*/ cameraToScreen );    // Transforms to raster coords [0,width/height-1]
@@ -478,6 +476,7 @@ namespace rsmgpt
                                     
             //// Initialize the constant buffer data.
             //m_cbPerFrame.gRasterToWorld = rasterToWorld.Transpose();
+#endif // 0
 
             // Get the GPU address of m_cbPerFrame.
             auto cbPerFrameGpuVA = m_constantBuffer->GetGPUVirtualAddress();

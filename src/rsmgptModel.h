@@ -52,7 +52,7 @@ struct ModelMesh
     unsigned vertexCount, vertexStart, indexCount, indexStart, materialIndex;
 };	// end of struct DXMesh
 
-    // Represents a node of a model. A node consists of one or more meshes and one or more children nodes.
+// Represents a node of a model. A node consists of one or more meshes and one or more children nodes.
 struct ModelNode
 {
     Mat4 transformation;

@@ -88,23 +88,21 @@ void main(
     {
         gOutput[ dispatchThreadId.xy ] = float4( 0.f, 0.f, 0.f, 1.f );
     }
-    
-    //// Create a ray, sphere and triangle out of the hardcoded params.
-    //Ray ray = { gCamPos, rayDir, tMax };
-    //Sphere sphere = { sphereOrigin, sphereRadius };
-    //Triangle tri = { v0, v2, v1 };
-
-    //// Colour the current pixel as blue if the sphere is hit, else black.
-    //float t, b1, b2;
-    //if( sphereIntersect( ray, sphere ) )
-    //    gOutput[ dispatchThreadId.xy ] = float4( 0.f, 0.f, 1.f, 1.f );
-    //else if( triangleIntersect( ray, tri, cullBackFacing, t, b1, b2 ) )
-    //    gOutput[ dispatchThreadId.xy ] = float4( 1.f, 0.f, 1.f, 1.f );
-    //else
-    //    gOutput[ dispatchThreadId.xy ] = float4( 0.f, 0.f, 0.f, 1.f );
 }
 
+//// Create a ray, sphere and triangle out of the hardcoded params.
+//Ray ray = { gCamPos, rayDir, tMax };
+//Sphere sphere = { sphereOrigin, sphereRadius };
+//Triangle tri = { v0, v2, v1 };
 
+//// Colour the current pixel as blue if the sphere is hit, else black.
+//float t, b1, b2;
+//if( sphereIntersect( ray, sphere ) )
+//    gOutput[ dispatchThreadId.xy ] = float4( 0.f, 0.f, 1.f, 1.f );
+//else if( triangleIntersect( ray, tri, cullBackFacing, t, b1, b2 ) )
+//    gOutput[ dispatchThreadId.xy ] = float4( 1.f, 0.f, 1.f, 1.f );
+//else
+//    gOutput[ dispatchThreadId.xy ] = float4( 0.f, 0.f, 0.f, 1.f );
 
 //// Compute the ray x and y components.
 //// Adapted from window to viewport transformation:

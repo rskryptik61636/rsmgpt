@@ -189,8 +189,13 @@ namespace rsmgpt
 
             // Populate the mesh indices of the current node.
             currNode.meshIndexes.resize( pCurrNode->mNumMeshes );
-            for( auto i = 0; i < currNode.meshIndexes.size(); ++i )
-                currNode.meshIndexes[ i ] = pCurrNode->mMeshes[ i ];
+            ::memcpy_s( 
+                currNode.meshIndexes.data(), 
+                currNode.meshIndexes.size() * sizeof( unsigned int ), 
+                pCurrNode->mMeshes, 
+                pCurrNode->mNumMeshes * sizeof( unsigned int ) );
+            /*for( auto i = 0; i < currNode.meshIndexes.size(); ++i )
+                currNode.meshIndexes[ i ] = pCurrNode->mMeshes[ i ];*/
 
             // Populate the children of the current node.
             currNode.childNodes.resize( pCurrNode->mNumChildren );
