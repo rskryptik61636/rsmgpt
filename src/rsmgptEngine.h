@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (c) 2015 Madayi Kolangarakath Rohit Shrinath
+* Copyright (c) 2015-2016 Madayi Kolangarakath Rohit Shrinath
 * 
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -116,8 +116,16 @@ namespace rsmgpt {
         D3D12_VIEWPORT m_viewport;
         D3D12_RECT m_scissorRect;
         ComPtr<IDXGISwapChain3> m_swapChain;
-        ComPtr<ID3D12Device> m_device;
+        ComPtr<ID3D12Device> m_d3d12Device;
+        ComPtr<ID3D11DeviceContext> m_d3d11DeviceContext;
+        ComPtr<ID3D11On12Device> m_d3d11On12Device;
+        ComPtr<IDWriteFactory> m_dWriteFactory;
+        ComPtr<ID2D1Factory3> m_d2dFactory;
+        ComPtr<ID2D1Device2> m_d2dDevice;
+        ComPtr<ID2D1DeviceContext2> m_d2dDeviceContext;
         ComPtr<ID3D12Resource> m_renderTargets[ FrameCount ];
+        ComPtr<ID3D11Resource> m_wrappedBackBuffers[ FrameCount ];
+        ComPtr<ID2D1Bitmap1> m_d2dRenderTargets[ FrameCount ];
         ComPtr<ID3D12CommandAllocator> m_commandAllocators[ FrameCount ];
         ComPtr<ID3D12CommandAllocator> m_computeCommandAllocators[ FrameCount ];
         ComPtr<ID3D12CommandQueue> m_commandQueue;
@@ -141,6 +149,8 @@ namespace rsmgpt {
         ComPtr<ID3D12PipelineState> m_computeState;
         ComPtr<ID3D12GraphicsCommandList> m_commandList;
         ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
+        ComPtr<ID2D1SolidColorBrush> m_textBrush;
+        ComPtr<IDWriteTextFormat> m_textFormat;
         ComPtr<ID3D12Resource> m_vertexBuffer;
         ComPtr<ID3D12Resource> m_constantBuffer;
         ComPtr<ID3D12Resource> m_depthStencil;
@@ -251,7 +261,7 @@ namespace rsmgpt {
         D3D12_VIEWPORT m_viewport;
         D3D12_RECT m_scissorRect;
         ComPtr<IDXGISwapChain3> m_swapChain;
-        ComPtr<ID3D12Device> m_device;
+        ComPtr<ID3D12Device> m_d3d12Device;
         CommandListManager m_commandManager;
 
         // TODO: Remove when done testing.

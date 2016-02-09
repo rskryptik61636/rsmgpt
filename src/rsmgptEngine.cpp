@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (c) 2015 Madayi Kolangarakath Rohit Shrinath
+* Copyright (c) 2015-2016 Madayi Kolangarakath Rohit Shrinath
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -98,15 +98,24 @@ namespace rsmgpt
 	void Engine::OnInit()
 	{
         // Enable the D3D12 debug layer if in debug mode.
-        #ifdef _DEBUG
+        UINT d3d11DeviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+        D2D1_FACTORY_OPTIONS d2dFactoryOptions = {};
+#if defined(_DEBUG)
+
+        // Enable the D2D debug layer.
+        d2dFactoryOptions.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
+
+        // Enable the D3D11 debug layer.
+        d3d11DeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+
+        {
+            ComPtr<ID3D12Debug> debugController;
+            if( SUCCEEDED( D3D12GetDebugInterface( IID_PPV_ARGS( &debugController ) ) ) )
             {
-                ComPtr<ID3D12Debug> debugController;
-                if( SUCCEEDED( D3D12GetDebugInterface( IID_PPV_ARGS( &debugController ) ) ) )
-                {
-                    debugController->EnableDebugLayer();
-                }
+                debugController->EnableDebugLayer();
             }
-        #endif
+        }
+#endif
 
         // Create a DXGIFactory and D3D12Device.
         ComPtr<IDXGIFactory4> factory;
@@ -124,7 +133,7 @@ namespace rsmgpt
                 D3D12CreateDevice(
                     warpAdapter.Get(),
                     D3D_FEATURE_LEVEL_11_0,
-                    IID_PPV_ARGS( &m_device )
+                    IID_PPV_ARGS( &m_d3d12Device )
                     ) );
         }
         else
@@ -133,7 +142,7 @@ namespace rsmgpt
                 D3D12CreateDevice(
                     nullptr,                    // Video adapter. nullptr implies the default adapter.
                     D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
-                    IID_PPV_ARGS( &m_device )   // D3D device object.
+                    IID_PPV_ARGS( &m_d3d12Device )   // D3D device object.
                     ) );
         }
         
@@ -141,12 +150,12 @@ namespace rsmgpt
         D3D12_COMMAND_QUEUE_DESC queueDesc = {};
         queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        ThrowIfFailed( m_device->CreateCommandQueue( &queueDesc, IID_PPV_ARGS( &m_commandQueue ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateCommandQueue( &queueDesc, IID_PPV_ARGS( &m_commandQueue ) ) );
 
         D3D12_COMMAND_QUEUE_DESC computeQueueDesc = {};
         computeQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
-        ThrowIfFailed( m_device->CreateCommandQueue( &computeQueueDesc, IID_PPV_ARGS( &m_computeCommandQueue ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateCommandQueue( &computeQueueDesc, IID_PPV_ARGS( &m_computeCommandQueue ) ) );
 
         // Describe and create the swap chain.
         DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
@@ -168,14 +177,58 @@ namespace rsmgpt
             ) );
         ThrowIfFailed( swapChain.As( &m_swapChain ) );
 
+        // This sample does not support fullscreen transitions.
+        ThrowIfFailed( factory->MakeWindowAssociation( m_hwnd, DXGI_MWA_NO_ALT_ENTER ) );
+
         // Set m_frameIndex to the current back buffer index.
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
+        // Create an 11 device wrapped around the 12 device and share 12's graphics command queue.
+        ComPtr<ID3D11Device> d3d11Device;
+        ThrowIfFailed( D3D11On12CreateDevice(
+            m_d3d12Device.Get(),
+            d3d11DeviceFlags,
+            nullptr,
+            0,
+            reinterpret_cast<IUnknown**>( m_commandQueue.GetAddressOf() ),
+            1,
+            0,
+            &d3d11Device,
+            &m_d3d11DeviceContext,
+            nullptr
+            ) );
+
+        // Query the 11On12 device from the 11 device.
+        ThrowIfFailed( d3d11Device.As( &m_d3d11On12Device ) );
+
+        // Create D2D/DWrite components.
+        {
+            D2D1_DEVICE_CONTEXT_OPTIONS deviceOptions = D2D1_DEVICE_CONTEXT_OPTIONS_NONE;
+            ThrowIfFailed( D2D1CreateFactory( D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof( ID2D1Factory3 ), &d2dFactoryOptions, &m_d2dFactory ) );
+            ComPtr<IDXGIDevice> dxgiDevice;
+            ThrowIfFailed( m_d3d11On12Device.As( &dxgiDevice ) );
+            ThrowIfFailed( m_d2dFactory->CreateDevice( dxgiDevice.Get(), &m_d2dDevice ) );
+            ThrowIfFailed( m_d2dDevice->CreateDeviceContext( deviceOptions, &m_d2dDeviceContext ) );
+            ThrowIfFailed( DWriteCreateFactory( DWRITE_FACTORY_TYPE_SHARED, __uuidof( IDWriteFactory ), &m_dWriteFactory ) );
+        }
+
+        // Query the desktop's dpi settings, which will be used to create
+        // D2D's render targets.
+        float dpiX;
+        float dpiY;
+        m_d2dFactory->GetDesktopDpi( &dpiX, &dpiY );
+        D2D1_BITMAP_PROPERTIES1 bitmapProperties = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            D2D1::PixelFormat( DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED ),
+            dpiX,
+            dpiY
+            );
+
         // Create descriptor heaps.
         {
-            m_pRtvHeap.reset( new RtvDescriptorHeap( m_device, FrameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
-            m_pDsvHeap.reset( new DsvDescriptorHeap( m_device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
-            m_pCsuHeap.reset( new CsuDescriptorHeap( m_device, CbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
+            m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, FrameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
+            m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
+            m_pCsuHeap.reset( new CsuDescriptorHeap( m_d3d12Device, CbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
         }
 
         // Create frame resources.
@@ -192,9 +245,33 @@ namespace rsmgpt
                     nullptr, 
                     "rtv" + std::to_string( n ) );
 
+                // Create a wrapped 11On12 resource of this back buffer. Since we are 
+                // rendering all D3D12 content first and then all D2D content, we specify 
+                // the In resource state as RENDER_TARGET - because D3D12 will have last 
+                // used it in this state - and the Out resource state as PRESENT. When 
+                // ReleaseWrappedResources() is called on the 11On12 device, the resource 
+                // will be transitioned to the PRESENT state.
+                D3D11_RESOURCE_FLAGS d3d11Flags = { D3D11_BIND_RENDER_TARGET };
+                ThrowIfFailed( m_d3d11On12Device->CreateWrappedResource(
+                    m_renderTargets[ n ].Get(),
+                    &d3d11Flags,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    D3D12_RESOURCE_STATE_PRESENT,
+                    IID_PPV_ARGS( &m_wrappedBackBuffers[ n ] )
+                    ) );
+
+                // Create a render target for D2D to draw directly to this back buffer.
+                ComPtr<IDXGISurface> surface;
+                ThrowIfFailed( m_wrappedBackBuffers[ n ].As( &surface ) );
+                ThrowIfFailed( m_d2dDeviceContext->CreateBitmapFromDxgiSurface(
+                    surface.Get(),
+                    &bitmapProperties,
+                    &m_d2dRenderTargets[ n ]
+                    ) );
+
                 // Create graphics and compute command allocators for the current frame.
-                ThrowIfFailed( m_device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &m_commandAllocators[ n ] ) ) );
-                ThrowIfFailed( m_device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS( &m_computeCommandAllocators[ n ] ) ) );
+                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &m_commandAllocators[ n ] ) ) );
+                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS( &m_computeCommandAllocators[ n ] ) ) );
             }
         }
             
@@ -229,7 +306,7 @@ namespace rsmgpt
             m_gfxRootSignature.initStaticSampler( 0, psSamplerDesc );
 
             // Create the graphics root signature description.
-            m_gfxRootSignature.finalize( m_device.Get() );
+            m_gfxRootSignature.finalize( m_d3d12Device.Get() );
 
             // The first compute root parameters is one CBV root descriptor which corresponds to the cbPerFrame in the path tracing kernel.
             m_computeRootSignature.reset( ComputeRootParametersCount, 0 );
@@ -242,7 +319,7 @@ namespace rsmgpt
             // The third compute root parameter is a table to the render output UAVs.
             CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0 );
             m_computeRootSignature[ ComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
-            m_computeRootSignature.finalize( m_device.Get() );
+            m_computeRootSignature.finalize( m_d3d12Device.Get() );
         }
 
         // Create the pipeline state, which includes compiling and loading shaders.
@@ -271,19 +348,19 @@ namespace rsmgpt
             psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
             psoDesc.SampleDesc.Count = 1;
 
-            ThrowIfFailed( m_device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_pipelineState ) ) );
+            ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_pipelineState ) ) );
 
             // Describe and create the compute pipeline state object (PSO).
             D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
             computePsoDesc.pRootSignature = m_computeRootSignature.get();
             computePsoDesc.CS = { g_prsmgptPathTracingKernelCS, _countof( g_prsmgptPathTracingKernelCS ) };
 
-            ThrowIfFailed( m_device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_computeState ) ) );
+            ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_computeState ) ) );
         }
 
         // Create the graphics and compute command lists.
         ThrowIfFailed( 
-            m_device->CreateCommandList( 
+            m_d3d12Device->CreateCommandList( 
                 0,                                          // GPU node (only 1 GPU for now)
                 D3D12_COMMAND_LIST_TYPE_DIRECT,             // Command list type
                 m_commandAllocators[ m_frameIndex ].Get(),  // Command allocator
@@ -291,7 +368,7 @@ namespace rsmgpt
                 IID_PPV_ARGS( &m_commandList ) ) );         // Command list (output)
         
         ThrowIfFailed( 
-            m_device->CreateCommandList( 
+            m_d3d12Device->CreateCommandList( 
                 0, 
                 D3D12_COMMAND_LIST_TYPE_COMPUTE, 
                 m_computeCommandAllocators[ m_frameIndex ].Get(), 
@@ -299,6 +376,23 @@ namespace rsmgpt
                 IID_PPV_ARGS( &m_computeCommandList ) ) );
         
         ThrowIfFailed( m_computeCommandList->Close() );
+
+        // Create D2D/DWrite objects for rendering text.
+        {
+            ThrowIfFailed( m_d2dDeviceContext->CreateSolidColorBrush( D2D1::ColorF( D2D1::ColorF::White ), &m_textBrush ) );
+            ThrowIfFailed( m_dWriteFactory->CreateTextFormat(
+                L"Verdana",
+                NULL,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                25,
+                L"en-us",
+                &m_textFormat
+                ) );
+            ThrowIfFailed( m_textFormat->SetTextAlignment( DWRITE_TEXT_ALIGNMENT_JUSTIFIED ) );
+            ThrowIfFailed( m_textFormat->SetParagraphAlignment( DWRITE_PARAGRAPH_ALIGNMENT_NEAR ) );
+        }
 
         ComPtr<ID3D12Resource> vertexBufferUpload;
         ComPtr<ID3D12Resource> commandBufferUpload;
@@ -341,7 +435,7 @@ namespace rsmgpt
 
             // Create the vertex buffer resource.
             createBuffer(
-                m_device.Get(),
+                m_d3d12Device.Get(),
                 m_commandList.Get(),
                 m_vertexBuffer,
                 vertexBufferSize,
@@ -374,7 +468,7 @@ namespace rsmgpt
             depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
             depthOptimizedClearValue.DepthStencil.Stencil = 0;
 
-            ThrowIfFailed( m_device->CreateCommittedResource(
+            ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                 &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
                 D3D12_HEAP_FLAG_NONE,
                 &CD3DX12_RESOURCE_DESC::Tex2D( 
@@ -400,7 +494,7 @@ namespace rsmgpt
             const UINT constantBufferDataSize = /*FrameCount **/ sizeof( ConstantBufferData );
 
             // Create an upload heap for the constant buffer data.
-            ThrowIfFailed( m_device->CreateCommittedResource(
+            ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                 &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),
                 D3D12_HEAP_FLAG_NONE,
                 &CD3DX12_RESOURCE_DESC::Buffer( constantBufferDataSize ),
@@ -496,7 +590,7 @@ namespace rsmgpt
         // Load the test model.
         {
             const path modelPath( "N:\\rsmgpt\\models\\test1.obj" );
-            m_pModel.reset( new Model( modelPath, m_device.Get(), m_commandList.Get() ) );
+            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );
 
             // Create SRVs for the model's vertex and index buffers.
             D3D12_SHADER_RESOURCE_VIEW_DESC vbDesc;
@@ -518,7 +612,7 @@ namespace rsmgpt
         {
             // Create the path tracer output texture.
             const auto pathTracerOutputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-            ThrowIfFailed( m_device->CreateCommittedResource(
+            ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                 &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
                 D3D12_HEAP_FLAG_NONE,
                 &CD3DX12_RESOURCE_DESC::Tex2D(
@@ -563,8 +657,8 @@ namespace rsmgpt
 
         // Create synchronization objects and wait until assets have been uploaded to the GPU.
         {
-            ThrowIfFailed( m_device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_fence ) ) );
-            ThrowIfFailed( m_device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_computeFence ) ) );
+            ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_fence ) ) );
+            ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_computeFence ) ) );
             m_fenceValues[ m_frameIndex ]++;
 
             // Create an event handle to use for frame synchronization.
@@ -638,8 +732,9 @@ namespace rsmgpt
             cbvSrvUavHeaps.data() );
 
         // Update m_cbPerFrame.
+        const auto camPos = m_pCamera->eyePosW();   // Storing that it can be used later when rendering it as text.
         m_cbPerFrame.gRasterToWorld = m_pCamera->rasterToWorld().Transpose();
-        m_cbPerFrame.gCamPos = m_pCamera->eyePosW();
+        m_cbPerFrame.gCamPos = camPos;
         m_cbPerFrame.gNumFaces = static_cast<unsigned>( m_pModel->numFaces() );
         memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );   // This will be updated at runtime.
         
@@ -720,10 +815,10 @@ namespace rsmgpt
             ptoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
             m_commandList->ResourceBarrier( 1, &ptoBarrier );
             
-            // Indicate that the back buffer will now be used to present.
-            rtBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            rtBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-            m_commandList->ResourceBarrier( 1, &rtBarrier );
+            //// Indicate that the back buffer will now be used to present.
+            //rtBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            //rtBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+            //m_commandList->ResourceBarrier( 1, &rtBarrier );
 
             // Close the graphics command list.
             ThrowIfFailed( m_commandList->Close() );
@@ -746,6 +841,40 @@ namespace rsmgpt
         m_commandQueue->ExecuteCommandLists( 
             static_cast<UINT>( ppCommandLists.size() ),
             ppCommandLists.data() );
+
+        // Render the test text.
+        {
+            D2D1_SIZE_F rtSize = m_d2dRenderTargets[ m_frameIndex ]->GetSize();
+            /*D2D1_RECT_F textRect = D2D1::RectF( 0, 0, rtSize.width, rtSize.height );*/
+            D2D1_RECT_F textRect = D2D1::RectF( 0, 0, 900, 100 );
+            std::wstring text = L"Camera position: (" + std::to_wstring( camPos.x ) + L", " + std::to_wstring( camPos.y ) + L", " + std::to_wstring( camPos.z ) + L")";
+            //static const WCHAR text[] = L"11On12";
+
+            // Acquire our wrapped render target resource for the current back buffer.
+            m_d3d11On12Device->AcquireWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
+
+            // Render text directly to the back buffer.
+            m_d2dDeviceContext->SetTarget( m_d2dRenderTargets[ m_frameIndex ].Get() );
+            m_d2dDeviceContext->BeginDraw();
+            m_d2dDeviceContext->SetTransform( D2D1::Matrix3x2F::Identity() );
+            m_d2dDeviceContext->DrawTextW(
+                text.c_str(),
+                text.length(),
+                //_countof( text ) - 1,
+                m_textFormat.Get(),
+                &textRect,
+                m_textBrush.Get()
+                );
+            ThrowIfFailed( m_d2dDeviceContext->EndDraw() );
+
+            // Release our wrapped render target resource. Releasing 
+            // transitions the back buffer resource to the state specified
+            // as the OutState when the wrapped resource was created.
+            m_d3d11On12Device->ReleaseWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
+
+            // Flush to submit the 11 command list to the shared command queue.
+            m_d3d11DeviceContext->Flush();
+        }
 
         // Present the frame.
         ThrowIfFailed( m_swapChain->Present( 1, 0 ) );
@@ -830,11 +959,11 @@ namespace rsmgpt
         D3D12CreateDevice(
             nullptr,                    // Video adapter. nullptr implies the default adapter.
             D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
-            IID_PPV_ARGS( &m_device )   // D3D device object.
+            IID_PPV_ARGS( &m_d3d12Device )   // D3D device object.
             ) );
 
     // Create a command manager for the device.
-    m_commandManager.Create( m_device.Get() );
+    m_commandManager.Create( m_d3d12Device.Get() );
 
     // Describe and create the swap chain.
     DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
@@ -923,7 +1052,7 @@ namespace rsmgpt
         ComPtr<ID3DBlob> signature;
         ComPtr<ID3DBlob> error;
         ThrowIfFailed( D3D12SerializeRootSignature( &rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error ) );
-        ThrowIfFailed( m_device->CreateRootSignature( 0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS( &m_rootSignature ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateRootSignature( 0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS( &m_rootSignature ) ) );
 #endif // 0
 
 
@@ -949,7 +1078,7 @@ namespace rsmgpt
         computeRootSignatureDesc.Init( _countof( computeRootParameters ), computeRootParameters );
 
         ThrowIfFailed( D3D12SerializeRootSignature( &computeRootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error ) );
-        ThrowIfFailed( m_device->CreateRootSignature( 0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS( &m_computeRootSignature ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateRootSignature( 0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS( &m_computeRootSignature ) ) );
 #endif // 0
 
     }
@@ -1013,7 +1142,7 @@ namespace rsmgpt
         psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
         psoDesc.SampleDesc.Count = 1;
 
-        ThrowIfFailed( m_device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_pipelineState ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_pipelineState ) ) );
 #endif  // 0
 
         // Describe and create the compute pipeline state object (PSO).
@@ -1025,7 +1154,7 @@ namespace rsmgpt
         computePsoDesc.pRootSignature = m_computeRootSignature.Get();
         computePsoDesc.CS = { reinterpret_cast<UINT8*>( rsmgptPathTracingKernelCS->GetBufferPointer() ), rsmgptPathTracingKernelCS->GetBufferSize() };
 
-        ThrowIfFailed( m_device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_computeState ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_computeState ) ) );
 #endif // 0
 
     }

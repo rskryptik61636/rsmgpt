@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (c) 2015 Madayi Kolangarakath Rohit Shrinath
+* Copyright (c) 2015-2016 Madayi Kolangarakath Rohit Shrinath
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ namespace rsmgpt
         void incrementHandles( const INT offset = 1 );
 
         // Device object.
-        ComPtr<ID3D12Device> m_device;
+        ComPtr<ID3D12Device> m_d3d12Device;
 
         // Descriptor heap type and flags.
         D3D12_DESCRIPTOR_HEAP_TYPE m_type;

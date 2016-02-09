@@ -20,23 +20,11 @@
 * THE SOFTWARE.
 ******************************************************************************/
 
-#include "rsmgptPathTracingCommon.hlsli"
+#pragma once
 
-// Pass through shader, the vertex position is passed through as-is.
-PS_IN main( /*uint id : SV_VertexID,*/ VS_IN vIn )
+#include <rsmgptDefns.h>
+
+namespace rsmgpt
 {
-    PS_IN vOut;
 
-    //// NOTE: This trick is explained here: https://www.reddit.com/r/gamedev/comments/2j17wk/a_slightly_faster_bufferless_vertex_shader_trick/
-    //vOut.texCoord.x = ( id == 2 ) ? 2.0 : 0.0;
-    //vOut.texCoord.y = ( id == 1 ) ? 2.0 : 0.0;
-    //vOut.position = float4( vOut.texCoord * float2( 2.0, -2.0 ) + float2( -1.0, 1.0 ), 0.0, 1.0 );
-
-    /*float x = float( ( id & 2 ) << 1 ) - 1.0;
-    float y = 1.0 - float( ( id & 1 ) << 2 );
-    vOut.position = float4( x, y, 0.0, 1.0 );    */
-
-    vOut.position = vIn.position;
-    vOut.texCoord = vIn.texCoord;
-    return vOut;
-}
+}   // end of namespace rsmgpt

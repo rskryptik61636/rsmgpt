@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (c) 2015 Madayi Kolangarakath Rohit Shrinath
+* Copyright (c) 2015-2016 Madayi Kolangarakath Rohit Shrinath
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 namespace rsmgpt
 {
     DescriptorHeap::DescriptorHeap( ComPtr<ID3D12Device>& device, const UINT numDescriptors, const D3D12_DESCRIPTOR_HEAP_TYPE type, const D3D12_DESCRIPTOR_HEAP_FLAGS flags ) :
-        m_device( device ),
+        m_d3d12Device( device ),
         m_type( type ),
         m_flags( flags )
     {
@@ -35,14 +35,14 @@ namespace rsmgpt
         heapDesc.NumDescriptors = numDescriptors;
         heapDesc.Type = m_type;
         heapDesc.Flags = m_flags;
-        ThrowIfFailed( m_device->CreateDescriptorHeap( &heapDesc, IID_PPV_ARGS( &m_heap ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateDescriptorHeap( &heapDesc, IID_PPV_ARGS( &m_heap ) ) );
 
         // Set the current CPU/GPU handles to the start of the heap.
         m_currCPUHandle = m_heap->GetCPUDescriptorHandleForHeapStart();
         m_currGPUHandle = m_heap->GetGPUDescriptorHandleForHeapStart();
 
         // Set the heap's increment size.
-        m_incrementSize = m_device->GetDescriptorHandleIncrementSize( m_type );
+        m_incrementSize = m_d3d12Device->GetDescriptorHandleIncrementSize( m_type );
     }
 
     // Updates the handle map.
@@ -67,7 +67,7 @@ namespace rsmgpt
     void CsuDescriptorHeap::addCBV( const D3D12_CONSTANT_BUFFER_VIEW_DESC* pCbvDesc, const std::string id )
     {
         // Add the CBV to the current location in the heap.
-        m_device->CreateConstantBufferView( pCbvDesc, m_currCPUHandle );
+        m_d3d12Device->CreateConstantBufferView( pCbvDesc, m_currCPUHandle );
 
         // Add the current CPU/GPU handles to the handle map.
         updateHandleMap( id );
@@ -79,7 +79,7 @@ namespace rsmgpt
     void CsuDescriptorHeap::addSRV( ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pSrvDesc, const std::string id )
     {
         // Add the SRV to the current location in the heap.
-        m_device->CreateShaderResourceView( pResource, pSrvDesc, m_currCPUHandle );
+        m_d3d12Device->CreateShaderResourceView( pResource, pSrvDesc, m_currCPUHandle );
 
         // Add the current CPU/GPU handles to the handle map.
         updateHandleMap( id );
@@ -91,7 +91,7 @@ namespace rsmgpt
     void CsuDescriptorHeap::addUAV( ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pUavDesc, const std::string id, ID3D12Resource* pCounterResource /*= nullptr*/ )
     {
         // Add the UAV to the current location in the heap.
-        m_device->CreateUnorderedAccessView( pResource, pCounterResource, pUavDesc, m_currCPUHandle );
+        m_d3d12Device->CreateUnorderedAccessView( pResource, pCounterResource, pUavDesc, m_currCPUHandle );
 
         // Add the current CPU/GPU handles to the handle map.
         updateHandleMap( id );
@@ -109,7 +109,7 @@ namespace rsmgpt
     void RtvDescriptorHeap::addRTV( ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pRtvDesc, const std::string id )
     {
         // Add the RTV to the current location in the heap.
-        m_device->CreateRenderTargetView( pResource, pRtvDesc, m_currCPUHandle );
+        m_d3d12Device->CreateRenderTargetView( pResource, pRtvDesc, m_currCPUHandle );
 
         // Add the current CPU/GPU handles to the handle map.
         updateHandleMap( id );
@@ -127,7 +127,7 @@ namespace rsmgpt
     void DsvDescriptorHeap::addDSV( ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDsvDesc, const std::string id )
     {
         // Add the DSV to the current location in the heap.
-        m_device->CreateDepthStencilView( pResource, pDsvDesc, m_currCPUHandle );
+        m_d3d12Device->CreateDepthStencilView( pResource, pDsvDesc, m_currCPUHandle );
 
         // Add the current CPU/GPU handles to the handle map.
         updateHandleMap( id );
@@ -145,7 +145,7 @@ namespace rsmgpt
     void SamplerDescriptorHeap::addSampler( const D3D12_SAMPLER_DESC* pSamplerDesc, const std::string id )
     {
         // Add the sampler to the current location in the heap.
-        m_device->CreateSampler( pSamplerDesc, m_currCPUHandle );
+        m_d3d12Device->CreateSampler( pSamplerDesc, m_currCPUHandle );
 
         // Add the current CPU/GPU handles to the handle map.
         updateHandleMap( id );
