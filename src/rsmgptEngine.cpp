@@ -815,10 +815,14 @@ namespace rsmgpt
             ptoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
             m_commandList->ResourceBarrier( 1, &ptoBarrier );
             
+            // NOTE: Shouldn't do this since we're rendering text on top of this render target.
+#if 0
             //// Indicate that the back buffer will now be used to present.
             //rtBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
             //rtBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-            //m_commandList->ResourceBarrier( 1, &rtBarrier );
+            //m_commandList->ResourceBarrier( 1, &rtBarrier );  
+#endif // 0
+
 
             // Close the graphics command list.
             ThrowIfFailed( m_commandList->Close() );
