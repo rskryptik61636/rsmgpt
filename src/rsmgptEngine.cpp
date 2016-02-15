@@ -35,6 +35,7 @@ namespace rsmgpt
 	// Engine ctor.
     Engine::Engine( const path sceneFile ) :
         DXSample( 1280, 1024, L"rsmgpt" ),
+        m_fenceValues{},
         m_frameIndex( 0 )
     {
         // Set the shaders dir.
@@ -86,7 +87,7 @@ namespace rsmgpt
         m_scissorRect.right = static_cast<LONG>( m_width );
         m_scissorRect.top = 0;
         m_scissorRect.bottom = static_cast<LONG>( m_height );
-
+                
         // TODO: Add implementation here.
     }
 
@@ -156,6 +157,10 @@ namespace rsmgpt
         computeQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
         computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
         ThrowIfFailed( m_d3d12Device->CreateCommandQueue( &computeQueueDesc, IID_PPV_ARGS( &m_computeCommandQueue ) ) );
+
+        // Get the timestamp frequency of the compute command queue.
+        //ThrowIfFailed( m_d3d12Device->SetStablePowerState( TRUE ) );  // TODO: Check if this actually makes a difference with timestamps in the same command list.
+        ThrowIfFailed( m_computeCommandQueue->GetTimestampFrequency( &m_computeCommandQueueTimestampFrequency ) );
 
         // Describe and create the swap chain.
         DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
@@ -229,6 +234,30 @@ namespace rsmgpt
             m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, FrameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
             m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
             m_pCsuHeap.reset( new CsuDescriptorHeap( m_d3d12Device, CbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
+        }
+
+        // Create query heaps and result buffers.
+        {
+            // Two timestamps for each frame.
+            const UINT resultCount = 2 * FrameCount;
+            const UINT resultBufferSize = resultCount * sizeof( UINT64 );
+
+            D3D12_QUERY_HEAP_DESC timestampHeapDesc = {};
+            timestampHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+            timestampHeapDesc.Count = resultCount;
+
+            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
+            {
+                ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
+                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
+                    D3D12_HEAP_FLAG_NONE,
+                    &CD3DX12_RESOURCE_DESC::Buffer( resultBufferSize ),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    nullptr,
+                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );
+
+                ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
+            }
         }
 
         // Create frame resources.
@@ -700,9 +729,43 @@ namespace rsmgpt
 #if 0
             if( GetAsyncKeyState( VK_NUMPAD7 ) & 0x8000 )	m_pCamera->roll( m_pCamera->rotationFactor() );			// roll left
             if( GetAsyncKeyState( VK_NUMPAD9 ) & 0x8000 )	m_pCamera->roll( -m_pCamera->rotationFactor() );			// roll right
-#endif	// 0
+#endif	// 0            
+        }
 
+        // Compute the time spent in the path tracing pass.
+        {
+            // The oldest frame is the one that was previously rendered.
+            const UINT oldestFrameIndex = ( m_frameIndex + 1 ) % FrameCount, completedFenceValue = m_fence->GetCompletedValue();
             
+            // The oldest frame is the current frame index and it will always be complete due to the wait in MoveToNextFrame().
+            //assert( m_fenceValues[ oldestFrameIndex ] <= m_fence->GetCompletedValue() );
+
+            // Get the timestamp values from the result buffers.
+            D3D12_RANGE readRange = {};
+            const D3D12_RANGE emptyRange = {};
+
+            //UINT64* ppMovingAverage[] = { m_drawTimes, m_blurTimes };
+            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
+            {
+                readRange.Begin = 2 * oldestFrameIndex * sizeof( UINT64 );
+                readRange.End = readRange.Begin + 2 * sizeof( UINT64 );
+
+                void* pData = nullptr;
+                ThrowIfFailed( m_timestampResultBuffer->Map( 0, &readRange, &pData ) );
+
+                const UINT64* pTimestamps = reinterpret_cast<UINT64*>( static_cast<UINT8*>( pData ) + readRange.Begin );
+                const UINT64 timeStampDelta = pTimestamps[ 1 ] - pTimestamps[ 0 ];
+
+                // Unmap with an empty range (written range).
+                m_timestampResultBuffer->Unmap( 0, &emptyRange );
+
+                // Calculate the GPU execution time in microseconds.
+                m_pathTracingTime = ( timeStampDelta * 1000000 ) / m_computeCommandQueueTimestampFrequency;
+                //ppMovingAverage[ i ][ m_currentTimesIndex ] = gpuTimeUS;
+            }
+
+            // Move to the next index.
+            //m_currentTimesIndex = ( m_currentTimesIndex + 1 ) % MovingAverageFrameCount;
         }
 
 		// TODO: Add implementation here.
@@ -722,11 +785,15 @@ namespace rsmgpt
         ThrowIfFailed( m_computeCommandList->Reset( m_computeCommandAllocators[ m_frameIndex ].Get(), m_computeState.Get() ) );
         ThrowIfFailed( m_commandList->Reset( m_commandAllocators[ m_frameIndex ].Get(), m_pipelineState.Get() ) );
 
+        // Get a timestamp at the start of the compute command list.
+        const UINT timestampHeapIndex = 2 * m_frameIndex;
+        m_computeCommandList->EndQuery( m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, timestampHeapIndex );
+
         // Set the compute root signature.
         m_computeCommandList->SetComputeRootSignature( m_computeRootSignature.get() );
 
         // Set the descriptor heaps.
-        std::array<ID3D12DescriptorHeap*, 1> cbvSrvUavHeaps = { m_pCsuHeap->getHeap() /*m_cbvSrvUavHeap.Get()*/ };
+        std::array<ID3D12DescriptorHeap*, 1> cbvSrvUavHeaps = { m_pCsuHeap->getHeap() };
         m_computeCommandList->SetDescriptorHeaps(
             static_cast<UINT>( cbvSrvUavHeaps.size() ),
             cbvSrvUavHeaps.data() );
@@ -753,8 +820,25 @@ namespace rsmgpt
             m_height / ComputeBlockSize,
             1 );
 
-        // Close the compute command list.
+        // Get a timestamp at the end of the compute command list and resolve the query data.
+        m_computeCommandList->EndQuery( m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, timestampHeapIndex + 1 );
+        m_computeCommandList->ResolveQueryData( 
+            m_timestampQueryHeap.Get(), 
+            D3D12_QUERY_TYPE_TIMESTAMP, 
+            timestampHeapIndex, 
+            2, 
+            m_timestampResultBuffer.Get(), 
+            timestampHeapIndex * sizeof( UINT64 ) );
+
+        // Close the compute command list and execute the compute work.
         ThrowIfFailed( m_computeCommandList->Close() );
+        std::array<ID3D12CommandList*, 1> ppCommandLists = { m_computeCommandList.Get() };
+        {
+            m_computeCommandQueue->ExecuteCommandLists(
+                static_cast<UINT>( ppCommandLists.size() ),
+                ppCommandLists.data() );
+            m_computeCommandQueue->Signal( m_computeFence.Get(), m_fenceValues[ m_frameIndex ] );
+        }
 
         // Record the rendering commands.
         {
@@ -828,20 +912,9 @@ namespace rsmgpt
             ThrowIfFailed( m_commandList->Close() );
         }
 
-        // Execute the compute work.
-        std::array<ID3D12CommandList*, 1> ppCommandLists = { m_computeCommandList.Get() };
-        {
-            m_computeCommandQueue->ExecuteCommandLists( 
-                static_cast<UINT>( ppCommandLists.size() ), 
-                ppCommandLists.data() );
-            m_computeCommandQueue->Signal( m_computeFence.Get(), m_fenceValues[ m_frameIndex ] );
-
-            // Execute the rendering work only when the compute work is complete.
-            m_commandQueue->Wait( m_computeFence.Get(), m_fenceValues[ m_frameIndex ] );
-        }
-
-        // Execute the rendering work.
+        // Execute the rendering work only when the compute work is complete.
         ppCommandLists[ 0 ] = m_commandList.Get();
+        m_commandQueue->Wait( m_computeFence.Get(), m_fenceValues[ m_frameIndex ] );
         m_commandQueue->ExecuteCommandLists( 
             static_cast<UINT>( ppCommandLists.size() ),
             ppCommandLists.data() );
@@ -850,8 +923,17 @@ namespace rsmgpt
         {
             D2D1_SIZE_F rtSize = m_d2dRenderTargets[ m_frameIndex ]->GetSize();
             /*D2D1_RECT_F textRect = D2D1::RectF( 0, 0, rtSize.width, rtSize.height );*/
-            D2D1_RECT_F textRect = D2D1::RectF( 0, 0, 900, 100 );
-            std::wstring text = L"Camera position: (" + std::to_wstring( camPos.x ) + L", " + std::to_wstring( camPos.y ) + L", " + std::to_wstring( camPos.z ) + L")";
+            D2D1_RECT_F textRect = D2D1::RectF( 0, 0, 900, 200 );
+            std::wstring text = 
+                L"Camera position: (" + 
+                std::to_wstring( camPos.x ) + 
+                L", " + 
+                std::to_wstring( camPos.y ) + 
+                L", " + 
+                std::to_wstring( camPos.z ) + 
+                L")\nPath tracing time = " + 
+                std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) + 
+                L" ms";
             //static const WCHAR text[] = L"11On12";
 
             // Acquire our wrapped render target resource for the current back buffer.
@@ -907,8 +989,9 @@ namespace rsmgpt
         ThrowIfFailed( m_commandQueue->Signal( m_fence.Get(), m_fenceValues[ m_frameIndex ] ) );
 
         // Wait until the fence has been processed.
-        ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
-        WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );
+        WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
+        /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
+        WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
 
         // Increment the fence value for the current frame.
         m_fenceValues[ m_frameIndex ]++;
@@ -930,458 +1013,16 @@ namespace rsmgpt
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
         // If the next frame is not ready to be rendered yet, wait until it is ready.
-        if( m_fence->GetCompletedValue() < m_fenceValues[ m_frameIndex ] )
+        const UINT64 completedValue = m_fence->GetCompletedValue();
+        if( completedValue < m_fenceValues[ m_frameIndex ] )
         {
-            ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
-            WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );
+            WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
+            /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
+            WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
         }
 
         // Set the fence value for the next frame.
         m_fenceValues[ m_frameIndex ] = currentFenceValue + 1;
     }
-
-#if 0
-    // Startup impl.
-    void Engine::OnInit()
-    {
-        // Enable the D3D12 debug layer if in debug mode.
-#ifdef _DEBUG
-    {
-        ComPtr<ID3D12Debug> debugController;
-        if( SUCCEEDED( D3D12GetDebugInterface( IID_PPV_ARGS( &debugController ) ) ) )
-        {
-            debugController->EnableDebugLayer();
-        }
-    }
-#endif
-
-    // Create a DXGIFactory and D3D12Device.
-    ComPtr<IDXGIFactory4> factory;
-    ThrowIfFailed( CreateDXGIFactory1( IID_PPV_ARGS( &factory ) ) );
-
-    ThrowIfFailed(
-        D3D12CreateDevice(
-            nullptr,                    // Video adapter. nullptr implies the default adapter.
-            D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
-            IID_PPV_ARGS( &m_d3d12Device )   // D3D device object.
-            ) );
-
-    // Create a command manager for the device.
-    m_commandManager.Create( m_d3d12Device.Get() );
-
-    // Describe and create the swap chain.
-    DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
-    swapChainDesc.BufferCount = FrameCount;
-    swapChainDesc.BufferDesc.Width = m_width;
-    swapChainDesc.BufferDesc.Height = m_height;
-    swapChainDesc.BufferDesc.Format = m_rtFormat;
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    swapChainDesc.OutputWindow = m_hwnd;
-    swapChainDesc.SampleDesc.Count = 1;
-    swapChainDesc.Windowed = TRUE;
-
-    ComPtr<IDXGISwapChain> swapChain;
-    ComPtr<ID3D12CommandQueue> commandQueue = m_commandManager.GetCommandQueue();   // TODO: Remove when done testing.
-    ThrowIfFailed( factory->CreateSwapChain(
-        commandQueue.Get()/*m_commandManager.GetCommandQueue()*/,		// Swap chain needs the render queue so that it can force a flush on it.
-        &swapChainDesc,
-        &swapChain
-        ) );
-    ThrowIfFailed( swapChain.As( &m_swapChain ) );
-
-    // Set m_frameIndex to the current back buffer index.
-    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-
-    // Create the swap chain buffers.
-    for( UINT i = 0; i < FrameCount; ++i )
-    {
-        ComPtr<ID3D12Resource> DisplayPlane;
-        ThrowIfFailed( m_swapChain->GetBuffer( i, MY_IID_PPV_ARGS( &DisplayPlane ) ) );
-        m_renderTargets[ i ].CreateFromSwapChain( L"Primary SwapChain Buffer", DisplayPlane.Detach() );
-    }
-
-    // Create the root signatures.
-    {
-        // Currently know of only one graphics root parameter, i.e. the SRV to the path tracer output.
-        // NOTE: The SRV to the path tracer output render target cannot be created as a root descriptor
-        //       because it pertains to a 2d texture and root descriptors can only be created for
-        //       structured and append/consume structured buffers.
-        m_gfxRootSignature.Reset( GraphicsRootParametersCount, 1 );
-        m_gfxRootSignature[ SrvTable ].InitAsDescriptorRange( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1, D3D12_SHADER_VISIBILITY_PIXEL );
-
-        // Create the static sampler desc for the point sampler in rsmgptPathTracingOutputPS.
-        SamplerDesc psSamplerDesc = SamplerDesc();
-        psSamplerDesc.AddressU = psSamplerDesc.AddressV = psSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-        psSamplerDesc.SetBorderColor( ::Color( 0.f, 0.f, 0.f ) );
-        m_gfxRootSignature.InitStaticSampler( 0, psSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL );
-
-        // Finalize the gfx root signature.
-        m_gfxRootSignature.Finalize();
-#if 0
-        std::array<CD3DX12_DESCRIPTOR_RANGE, 1> graphicsSrvRange;
-        graphicsSrvRange[ 0 ].Init( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0 );
-
-        // TODO: Add more graphics root parameters as they become known.
-
-        CD3DX12_ROOT_PARAMETER rootParameters[ GraphicsRootParametersCount ];
-        rootParameters[ SrvTable ].InitAsDescriptorTable(
-            static_cast<UINT>( graphicsSrvRange.size() ),
-            graphicsSrvRange.data(),
-            D3D12_SHADER_VISIBILITY_PIXEL );
-#endif // 0            
-
-#if 0
-        CD3DX12_STATIC_SAMPLER_DESC psSamplerDesc =
-            CD3DX12_STATIC_SAMPLER_DESC(
-                0,                                      // Shader bind slot.
-                D3D12_FILTER_MIN_MAG_MIP_POINT,         // Filtering mode.
-                D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // U address mode.
-                D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // V address mode.
-                D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // W address mode.
-                0.f,                                    // Mip LOD bias (default value).
-                16U,                                    // Max anisotropy (default value).
-                D3D12_COMPARISON_FUNC_LESS_EQUAL,       // Sampler comparison function (default value).
-                D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, // Border colour.
-                0.f,                                    // Min LOD (default value).
-                D3D12_FLOAT32_MAX,                      // Max LOD (default value).
-                D3D12_SHADER_VISIBILITY_PIXEL,          // Shader visibility.
-                0U );                                   // Register space.
-
-                                                        // Create the graphics root signature description.
-        CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
-        rootSignatureDesc.Init( _countof( rootParameters ), rootParameters, 1, &psSamplerDesc, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT );
-
-        // Create the graphics root signature.
-        ComPtr<ID3DBlob> signature;
-        ComPtr<ID3DBlob> error;
-        ThrowIfFailed( D3D12SerializeRootSignature( &rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error ) );
-        ThrowIfFailed( m_d3d12Device->CreateRootSignature( 0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS( &m_rootSignature ) ) );
-#endif // 0
-
-
-        // The first compute root parameters is one CBV root descriptor which corresponds to the cbPerFrame in the path tracing kernel.
-        m_computeRootSignature.Reset( ComputeRootParametersCount );
-        m_computeRootSignature[ CbvCbPerFrame ].InitAsConstantBuffer( 0 );
-        m_computeRootSignature[ UavTable ].InitAsDescriptorRange( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1 );
-
-        // Finalize the compute root signature.
-        m_computeRootSignature.Finalize();
-#if 0
-        CD3DX12_ROOT_PARAMETER computeRootParameters[ ComputeRootParametersCount ];
-        computeRootParameters[ CbvCbPerFrame ].InitAsConstantBufferView( 0, 0, D3D12_SHADER_VISIBILITY_ALL );
-
-        // The second compute root parameter is a table to the render output UAVs.
-        std::array<CD3DX12_DESCRIPTOR_RANGE, 1> computeUavRange;
-        computeUavRange[ 0 ].Init( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0 );
-        computeRootParameters[ UavTable ].InitAsDescriptorTable(
-            static_cast<UINT>( computeUavRange.size() ),
-            computeUavRange.data() );
-
-        CD3DX12_ROOT_SIGNATURE_DESC computeRootSignatureDesc;
-        computeRootSignatureDesc.Init( _countof( computeRootParameters ), computeRootParameters );
-
-        ThrowIfFailed( D3D12SerializeRootSignature( &computeRootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error ) );
-        ThrowIfFailed( m_d3d12Device->CreateRootSignature( 0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS( &m_computeRootSignature ) ) );
-#endif // 0
-
-    }
-
-    // Create the pipeline state, which includes compiling and loading shaders.
-    {
-#if 0
-        ComPtr<ID3DBlob> rsmgptPathTracingOutputVS;
-        ComPtr<ID3DBlob> rsmgptPathTracingOutputPS;
-        ComPtr<ID3DBlob> rsmgptPathTracingKernelCS;
-        ComPtr<ID3DBlob> error;
-
-#ifdef _DEBUG
-        // Enable better shader debugging with the graphics debugging tools.
-        UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#else
-        UINT compileFlags = 0;
-#endif
-
-        // Read the compiled .cso files into blobs.
-        CreateShaderBlob( "rsmgptPathTracingOutputVS.cso", &rsmgptPathTracingOutputVS );
-        CreateShaderBlob( "rsmgptPathTracingOutputPS.cso", &rsmgptPathTracingOutputPS );
-        CreateShaderBlob( "rsmgptPathTracingKernelCS.cso", &rsmgptPathTracingKernelCS );
-
-        // Define the vertex input layout.
-        // TODO: This needs to be defined. We can probably get away with the bare minimum here because all we need to do is describe a full screen quad.
-        D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
-        {
-            { "POSITION",   0,  DXGI_FORMAT_R32G32B32_FLOAT,   0,   0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-            { "TEXCOORD",   0,  DXGI_FORMAT_R32G32_FLOAT,      0,   12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        };
-#endif // 0
-
-
-        // Describe and create the graphics pipeline state objects (PSO).
-        //m_gfxPSO.SetInputLayout(input)
-        m_gfxPSO.SetRootSignature( m_gfxRootSignature );
-        m_gfxPSO.SetVertexShader( g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) );
-        m_gfxPSO.SetPixelShader( g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) );
-        m_gfxPSO.SetRasterizerState( CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT ) /*RasterizerDefault*/ );
-        m_gfxPSO.SetBlendState( CD3DX12_BLEND_DESC( D3D12_DEFAULT ) /*BlendDisable*/ );
-        m_gfxPSO.SetDepthStencilState( CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT ) /*DepthStateTestEqual*/ );
-        m_gfxPSO.SetSampleMask( UINT_MAX );
-        m_gfxPSO.SetPrimitiveTopologyType( D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE );
-        m_gfxPSO.SetRenderTargetFormats( 1, &m_rtFormat, m_dsFormat );
-        m_gfxPSO.Finalize();
-
-#if 0
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-        psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
-        psoDesc.pRootSignature = m_rootSignature.Get();
-        psoDesc.VS = { reinterpret_cast<UINT8*>( rsmgptPathTracingOutputVS->GetBufferPointer() ), rsmgptPathTracingOutputVS->GetBufferSize() };
-        psoDesc.PS = { reinterpret_cast<UINT8*>( rsmgptPathTracingOutputPS->GetBufferPointer() ), rsmgptPathTracingOutputPS->GetBufferSize() };
-        psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
-        psoDesc.BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
-        psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
-        psoDesc.SampleMask = UINT_MAX;
-        psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[ 0 ] = DXGI_FORMAT_R8G8B8A8_UNORM;
-        psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
-        psoDesc.SampleDesc.Count = 1;
-
-        ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_pipelineState ) ) );
-#endif  // 0
-
-        // Describe and create the compute pipeline state object (PSO).
-        m_computePSO.SetRootSignature( m_computeRootSignature );
-        m_computePSO.SetComputeShader( g_prsmgptPathTracingKernelCS, _countof( g_prsmgptPathTracingKernelCS ) );
-        m_computePSO.Finalize();
-#if 0
-        D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
-        computePsoDesc.pRootSignature = m_computeRootSignature.Get();
-        computePsoDesc.CS = { reinterpret_cast<UINT8*>( rsmgptPathTracingKernelCS->GetBufferPointer() ), rsmgptPathTracingKernelCS->GetBufferSize() };
-
-        ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_computeState ) ) );
-#endif // 0
-
-    }
-
-    // Create the depth buffer and path tracer output.
-    m_depthStencil.Create( L"Depth buffer", m_width, m_height, m_dsFormat );
-    m_pathTracerOutput.Create( L"Path tracer output", m_width, m_height, 1, m_rtFormat );
-
-    // Initialize the constant buffer data.
-    // TODO: Using the default params from smallpt. Update when we implement a dynamic camera system.
-    m_cbPerFrame.gCamPos = Vec3( 50.f, 52.f, 295.6f );
-    m_cbPerFrame.gCamAspectRatio = .5135f;
-    m_cbPerFrame.gCamDir = Vec3( 0.f, -0.042612f, -1.f );
-    }
-#endif // 0
-
-#if 0
-    void Engine::OnRender()
-    {
-        // Begin the compute context.
-        ComputeContext& computeContext = ComputeContext::Begin( L"Run path tracer" );
-
-        // Set the compute root signature and pipeline state.
-        computeContext.SetRootSignature( m_computeRootSignature );
-        computeContext.SetPipelineState( m_computePSO );
-
-        // Set the compute pipeline bindings.
-        computeContext.SetDynamicConstantBufferView( CbvCbPerFrame, sizeof( m_cbPerFrame ), &m_cbPerFrame );
-        computeContext.SetDynamicDescriptor( UavTable, 0, m_pathTracerOutput.GetUAV() );
-
-        // Dispatch enough thread groups to cover the entire screen.
-        computeContext.Dispatch3D(
-            m_width /*/ ComputeBlockSize*/,
-            m_height /*/ ComputeBlockSize*/,
-            1,
-            ComputeBlockSize,
-            ComputeBlockSize,
-            1 );
-
-        // Close and execute the compute context. Get the fence because we'll have to wait on it before executing the graphics context.
-        m_computeFence = computeContext.CloseAndExecute();
-
-#if 0
-        // Set the compute root signature.
-        m_computeCommandList->SetComputeRootSignature( m_computeRootSignature.Get() );
-
-        // Set the descriptor heaps.
-        std::array<ID3D12DescriptorHeap*, 1> cbvSrvUavHeaps = { m_cbvSrvUavHeap.Get() };
-        m_computeCommandList->SetDescriptorHeaps(
-            static_cast<UINT>( cbvSrvUavHeaps.size() ),
-            cbvSrvUavHeaps.data() );
-
-        // Set the compute pipeline bindings.
-        m_cbvSrvUavHeapGpuHandle = m_cbvSrvUavHeap->GetGPUDescriptorHandleForHeapStart();   // Set the GPU descriptor handle to the start of the descriptor heap.
-        m_computeCommandList->SetComputeRootConstantBufferView( CbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
-        m_cbvSrvUavHeapGpuHandle.Offset( m_cbvSrvUavDescriptorSize );   // Increment the GPU descriptor handle.
-        m_computeCommandList->SetComputeRootDescriptorTable(
-            UavTable,
-            m_cbvSrvUavHeapGpuHandle ); // Set the UAV table.
-        m_cbvSrvUavHeapGpuHandle.Offset( m_cbvSrvUavDescriptorSize );   // Increment the GPU descriptor handle.
-
-                                                                        // Dispatch enough thread groups to cover the entire screen.
-        m_computeCommandList->Dispatch(
-            m_width / ComputeBlockSize,
-            m_height / ComputeBlockSize,
-            1 );
-
-        // Close the compute command list.
-        ThrowIfFailed( m_computeCommandList->Close() );
-#endif // 0
-
-        // Record the rendering commands.
-        GraphicsContext& gfxContext = GraphicsContext::Begin( L"Output render" );
-
-        // Set the root signature and pipeline state.
-        gfxContext.SetRootSignature( m_gfxRootSignature );
-        gfxContext.SetPipelineState( m_gfxPSO );
-
-        // Set the viewport and scissor rect.
-        // NOTE: The scissor rect is important as D3D12 defaults to an empty scissor rect which means that nothing
-        //       will be rendered if it is not set.
-        gfxContext.SetViewportAndScissor(
-            static_cast<UINT>( m_viewport.TopLeftX ),
-            static_cast<UINT>( m_viewport.TopLeftY ),
-            static_cast<UINT>( m_viewport.Width ),
-            static_cast<UINT>( m_viewport.Height ) );
-
-        // Clear the render target and depth-stencil views. Looks like the gfxContext takes care of transitioning the resource internally.
-        gfxContext.TransitionResource( m_renderTargets[ m_frameIndex ], D3D12_RESOURCE_STATE_RENDER_TARGET );
-        gfxContext.SetRenderTargets( 1, &m_renderTargets[ m_frameIndex ], &m_depthStencil );
-        gfxContext.ClearColor( m_renderTargets[ m_frameIndex ] );
-        gfxContext.ClearDepthAndStencil( m_depthStencil );
-
-        // Set the primitive topology.
-        gfxContext.SetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
-        //m_commandList->IASetVertexBuffers( 0, 1, &m_vertexBufferView );
-
-        // Set the pixel shader SRV table.
-        gfxContext.SetDynamicDescriptor( SrvTable, 0, m_pathTracerOutput.GetSRV() );
-
-        // Transition the path tracer output from UAV to SRV state.
-        gfxContext.TransitionResource( m_pathTracerOutput, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE );
-
-        // Draw the full-screen triangle.
-        gfxContext.Draw( 3 );
-
-        // Transition the path tracer output from SRV to UAV state and the current back buffer from render target to present state.
-        gfxContext.TransitionResource( m_pathTracerOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS );
-        gfxContext.TransitionResource( m_renderTargets[ m_frameIndex ], D3D12_RESOURCE_STATE_PRESENT );
-
-        // Close and execute the graphics context once the compute context has finished executing.
-        m_commandManager.WaitForFence( m_computeFence );
-        m_gfxFence = gfxContext.CloseAndExecute();
-
-        // Present and update the current frame index.
-        ThrowIfFailed( m_swapChain->Present( 1, 0 ) );
-        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-
-        // Wait for the graphics context to finish executing.
-        m_commandManager.WaitForFence( m_gfxFence );
-
-#if 0
-        // Record the rendering commands.
-        {
-            // Set necessary state.
-            m_commandList->SetGraphicsRootSignature( m_rootSignature.Get() );
-
-            // Set the descriptor heaps again for the graphics pipeline.
-            m_commandList->SetDescriptorHeaps(
-                static_cast<UINT>( cbvSrvUavHeaps.size() ),
-                cbvSrvUavHeaps.data() );
-
-            // Set the viewport and scissor rect.
-            // NOTE: The scissor rect is important as D3D12 defaults to an empty scissor rect which means that nothing
-            //       will be rendered if it is not set.
-            m_commandList->RSSetViewports( 1, &m_viewport );
-            m_commandList->RSSetScissorRects( 1, &m_scissorRect );
-
-            // Add a resource barrier indicating that the current back buffer will be used as a render target.
-            D3D12_RESOURCE_BARRIER rtBarrier =
-                CD3DX12_RESOURCE_BARRIER::Transition(
-                    m_renderTargets[ m_frameIndex ].Get(),
-                    D3D12_RESOURCE_STATE_PRESENT,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET );
-            m_commandList->ResourceBarrier( 1, &rtBarrier );
-
-            // Get handles to the current back buffer's RTV and the DSV and bind them to the graphics pipeline.
-            CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle( m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize );
-            CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle( m_dsvHeap->GetCPUDescriptorHandleForHeapStart() );
-            m_commandList->OMSetRenderTargets( 1, &rtvHandle, FALSE, &dsvHandle );
-
-            // Clear the render target and depth-stencil views.
-            const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-            m_commandList->ClearRenderTargetView( rtvHandle, clearColor, 0, nullptr );
-            m_commandList->ClearDepthStencilView( dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr );
-
-            // Set the primitive topology and vertex buffer.
-            m_commandList->IASetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
-            m_commandList->IASetVertexBuffers( 0, 1, &m_vertexBufferView );
-
-            // Bind the path tracer output SRV to the graphics pipeline.
-            m_commandList->SetGraphicsRootDescriptorTable(
-                SrvTable,
-                m_cbvSrvUavHeapGpuHandle ); // Set the UAV table.
-
-                                            // Add a barrier indicating that the path tracer output is going to be used as an SRV.
-            D3D12_RESOURCE_BARRIER ptoBarrier =
-                CD3DX12_RESOURCE_BARRIER::Transition(
-                    m_pathTracerOutput.Get(),
-                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE );
-            m_commandList->ResourceBarrier( 1, &ptoBarrier );
-
-            // Draw the full-screen triangle.
-            m_commandList->DrawInstanced( 3, 1, 0, 0 );
-
-            // Add a barrier reverting the path tracer output to the unordered access state for the next compute pass.
-            ptoBarrier.Transition.StateBefore = ptoBarrier.Transition.StateAfter;
-            ptoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            m_commandList->ResourceBarrier( 1, &ptoBarrier );
-
-            // Indicate that the back buffer will now be used to present.
-            rtBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            rtBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-            m_commandList->ResourceBarrier( 1, &rtBarrier );
-
-            // Close the graphics command list.
-            ThrowIfFailed( m_commandList->Close() );
-        }
-
-        // Execute the compute work.
-        std::array<ID3D12CommandList*, 1> ppCommandLists = { m_computeCommandList.Get() };
-        {
-            m_computeCommandQueue->ExecuteCommandLists(
-                static_cast<UINT>( ppCommandLists.size() ),
-                ppCommandLists.data() );
-            m_computeCommandQueue->Signal( m_computeFence.Get(), m_fenceValues[ m_frameIndex ] );
-
-            // Execute the rendering work only when the compute work is complete.
-            m_commandQueue->Wait( m_computeFence.Get(), m_fenceValues[ m_frameIndex ] );
-        }
-
-        // Execute the rendering work.
-        ppCommandLists[ 0 ] = m_commandList.Get();
-        m_commandQueue->ExecuteCommandLists(
-            static_cast<UINT>( ppCommandLists.size() ),
-            ppCommandLists.data() );
-
-        // Present the frame.
-        ThrowIfFailed( m_swapChain->Present( 1, 0 ) );
-
-        MoveToNextFrame();
-#endif  // 0
-    }
-#endif // 0
-
-#if 0
-    void Engine::OnDestroy()
-    {
-        // Wait for the compute and gfx contexts to complete execution.
-        m_commandManager.WaitForFence( m_computeFence );
-        m_commandManager.WaitForFence( m_gfxFence );
-    }
-#endif // 0
 
 }	// end of namespace rsmgpt

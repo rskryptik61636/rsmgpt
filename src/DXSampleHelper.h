@@ -100,3 +100,9 @@ inline HRESULT ReadDataFromFile(LPCWSTR filename, byte** data, UINT* size)
 
 	return S_OK;
 }
+
+inline void WaitForFenceOnCPU( ID3D12Fence* pFence, UINT64 fenceValue, HANDLE fenceEvent )
+{
+    ThrowIfFailed( pFence->SetEventOnCompletion( fenceValue, fenceEvent ) );
+    WaitForSingleObjectEx( fenceEvent, INFINITE, FALSE );
+}

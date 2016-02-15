@@ -155,6 +155,10 @@ namespace rsmgpt {
         ComPtr<ID3D12Resource> m_constantBuffer;
         ComPtr<ID3D12Resource> m_depthStencil;
         ComPtr<ID3D12Resource> m_pathTracerOutput;
+        ComPtr<ID3D12QueryHeap> m_timestampQueryHeap;
+        ComPtr<ID3D12Resource> m_timestampResultBuffer;
+        UINT64 m_computeCommandQueueTimestampFrequency;
+        UINT64 m_pathTracingTime;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
         ModelPtr m_pModel;
 
