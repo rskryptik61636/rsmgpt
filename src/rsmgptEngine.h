@@ -51,7 +51,15 @@ namespace rsmgpt {
     class Engine : public DXSample
     {
     public:
-        Engine( const path sceneFile );
+
+        // Operation mode.
+        enum OperationMode
+        {
+            OM_PATH_TRACER, // Path tracing mode (default)
+            OM_DEBUG_ACCEL  // Acceleration structure debug mode
+        };
+
+        Engine( const path sceneFile, const OperationMode operationMode = OM_PATH_TRACER );
         ~Engine();
 
     protected:
@@ -61,9 +69,25 @@ namespace rsmgpt {
         virtual void OnDestroy() override;
         virtual bool OnEvent( MSG msg ) override;
 
+        // Helper functions.
+        void waitForGpu();
+        void moveToNextFrame();
+        void createShaderBlob( const char* shaderName, ID3DBlob** ppBlob );
+
+        // Init methods.
+        void initPathTracingMode();
+        void initDebugAccelMode();
+
+        // Render methods.
+        void renderPathTracingMode();
+        void renderDebugAccelMode();
+
         // Engine constants.
         static const UINT FrameCount = 2;   // TODO: Rename to m_FrameCount once we've got whatever code we need from the D3D12 samples.
         static const UINT ComputeBlockSize = 16;
+
+        // Operation mode.
+        OperationMode m_opMode;
 
         // Vertex definition.
         struct Vertex
@@ -145,8 +169,9 @@ namespace rsmgpt {
         HANDLE m_fenceEvent;
 
         // Asset objects.
-        ComPtr<ID3D12PipelineState> m_pipelineState;
-        ComPtr<ID3D12PipelineState> m_computeState;
+        ComPtr<ID3D12PipelineState> m_fullScreenTri3DPSO;
+        ComPtr<ID3D12PipelineState> m_debugAccel3DPSO;
+        ComPtr<ID3D12PipelineState> m_pathTracingComputePSO;
         ComPtr<ID3D12GraphicsCommandList> m_commandList;
         ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
         ComPtr<ID2D1SolidColorBrush> m_textBrush;
@@ -195,12 +220,7 @@ namespace rsmgpt {
 #endif // 0
 
         // Asset paths.
-        path m_shadersDir;
-
-        // Helper functions.
-        void WaitForGpu();
-        void MoveToNextFrame();
-        void CreateShaderBlob( const char* shaderName, ID3DBlob** ppBlob );
+        path m_shadersDir;        
     };
 
 #if 0

@@ -33,8 +33,9 @@
 namespace rsmgpt
 {
 	// Engine ctor.
-    Engine::Engine( const path sceneFile ) :
+    Engine::Engine( const path sceneFile, const OperationMode operationMode /*= OM_PATH_TRACER*/ ) :
         DXSample( 1280, 1024, L"rsmgpt" ),
+        m_opMode( operationMode ),
         m_fenceValues{},
         m_frameIndex( 0 )
     {
@@ -98,6 +99,161 @@ namespace rsmgpt
 
 	void Engine::OnInit()
 	{
+        // Call the init function of the set operation mode.
+        switch( m_opMode )
+        {
+        case OM_PATH_TRACER:
+            initPathTracingMode();
+            break;
+
+        case OM_DEBUG_ACCEL:
+            initDebugAccelMode();
+            break;
+        }
+	}
+
+	void Engine::OnUpdate()
+	{
+        // Move the camera.
+        if( m_pCamera.get() )
+        {
+            if( GetAsyncKeyState( 'A' ) & 0x8000 )	m_pCamera->slide( -m_pCamera->motionFactor(), 0, 0 );	// move left	
+            if( GetAsyncKeyState( 'D' ) & 0x8000 )	m_pCamera->slide( m_pCamera->motionFactor(), 0, 0 );	// move right
+            if( GetAsyncKeyState( 'W' ) & 0x8000 )	m_pCamera->slide( 0, 0, m_pCamera->motionFactor() );		// move forward
+            if( GetAsyncKeyState( 'S' ) & 0x8000 )	m_pCamera->slide( 0, 0, -m_pCamera->motionFactor() );		// move backward
+            if( GetAsyncKeyState( 'Q' ) & 0x8000 )	m_pCamera->slide( 0, m_pCamera->motionFactor(), 0 );			// move up
+            if( GetAsyncKeyState( 'E' ) & 0x8000 )	m_pCamera->slide( 0, -m_pCamera->motionFactor(), 0 );			// move down
+
+            if( GetAsyncKeyState( VK_NUMPAD4 ) & 0x8000 )	m_pCamera->rotateY( -m_pCamera->rotationFactor() );	// yaw left
+            if( GetAsyncKeyState( VK_NUMPAD6 ) & 0x8000 )	m_pCamera->rotateY( m_pCamera->rotationFactor() );	// yaw right
+            if( GetAsyncKeyState( VK_NUMPAD8 ) & 0x8000 )	m_pCamera->pitch( -m_pCamera->rotationFactor() );		// pitch up
+            if( GetAsyncKeyState( VK_NUMPAD5 ) & 0x8000 )	m_pCamera->pitch( m_pCamera->rotationFactor() );		// pitch down
+
+            // Zoom in/out according to the keyboard input
+            if( GetAsyncKeyState( VK_NUMPAD1 ) & 0x8000 )	m_pCamera->zoomOut();	// zoom out
+            if( GetAsyncKeyState( VK_NUMPAD3 ) & 0x8000 )	m_pCamera->zoomIn();	// zoom in
+
+            // NOTE: Disabling rolls as we don't really need them.
+#if 0
+            if( GetAsyncKeyState( VK_NUMPAD7 ) & 0x8000 )	m_pCamera->roll( m_pCamera->rotationFactor() );			// roll left
+            if( GetAsyncKeyState( VK_NUMPAD9 ) & 0x8000 )	m_pCamera->roll( -m_pCamera->rotationFactor() );			// roll right
+#endif	// 0            
+        }
+
+        // Compute the time spent in the path tracing pass.
+        {
+            // The oldest frame is the one that was previously rendered.
+            const UINT oldestFrameIndex = ( m_frameIndex + 1 ) % FrameCount, completedFenceValue = m_fence->GetCompletedValue();
+            
+            // The oldest frame is the current frame index and it will always be complete due to the wait in moveToNextFrame().
+            //assert( m_fenceValues[ oldestFrameIndex ] <= m_fence->GetCompletedValue() );
+
+            // Get the timestamp values from the result buffers.
+            D3D12_RANGE readRange = {};
+            const D3D12_RANGE emptyRange = {};
+
+            //UINT64* ppMovingAverage[] = { m_drawTimes, m_blurTimes };
+            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
+            {
+                readRange.Begin = 2 * oldestFrameIndex * sizeof( UINT64 );
+                readRange.End = readRange.Begin + 2 * sizeof( UINT64 );
+
+                void* pData = nullptr;
+                ThrowIfFailed( m_timestampResultBuffer->Map( 0, &readRange, &pData ) );
+
+                const UINT64* pTimestamps = reinterpret_cast<UINT64*>( static_cast<UINT8*>( pData ) + readRange.Begin );
+                const UINT64 timeStampDelta = pTimestamps[ 1 ] - pTimestamps[ 0 ];
+
+                // Unmap with an empty range (written range).
+                m_timestampResultBuffer->Unmap( 0, &emptyRange );
+
+                // Calculate the GPU execution time in microseconds.
+                m_pathTracingTime = ( timeStampDelta * 1000000 ) / m_computeCommandQueueTimestampFrequency;
+                //ppMovingAverage[ i ][ m_currentTimesIndex ] = gpuTimeUS;
+            }
+
+            // Move to the next index.
+            //m_currentTimesIndex = ( m_currentTimesIndex + 1 ) % MovingAverageFrameCount;
+        }
+
+		// TODO: Add implementation here.
+	}
+
+	void Engine::OnRender()
+	{
+        // Call the render function of the set operation mode.
+        switch( m_opMode )
+        {
+        case OM_PATH_TRACER:
+            renderPathTracingMode();
+            break;
+
+        case OM_DEBUG_ACCEL:
+            renderDebugAccelMode();
+            break;
+        }
+	}
+
+	void Engine::OnDestroy()
+	{
+        // Wait for the GPU to be done with all resources.
+        waitForGpu();
+
+        CloseHandle( m_fenceEvent );
+	}
+
+	bool Engine::OnEvent(MSG msg)
+	{
+		// TODO: Add implementation here.
+
+		return true;
+	}
+
+    void Engine::waitForGpu()
+    {
+        // Schedule a Signal command in the queue.
+        ThrowIfFailed( m_commandQueue->Signal( m_fence.Get(), m_fenceValues[ m_frameIndex ] ) );
+
+        // Wait until the fence has been processed.
+        WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
+        /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
+        WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
+
+        // Increment the fence value for the current frame.
+        m_fenceValues[ m_frameIndex ]++;
+    }
+
+    void Engine::createShaderBlob( const char* shaderName, ID3DBlob** ppBlob )
+    {
+        ThrowIfFailed( D3DReadFileToBlob( path( m_shadersDir / path( shaderName ) ).c_str(), ppBlob ) );
+    }
+
+    // Prepare to render the next frame.
+    void Engine::moveToNextFrame()
+    {
+        // Schedule a Signal command in the queue.
+        const UINT64 currentFenceValue = m_fenceValues[ m_frameIndex ];
+        ThrowIfFailed( m_commandQueue->Signal( m_fence.Get(), currentFenceValue ) );
+
+        // Update the frame index.
+        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+
+        // If the next frame is not ready to be rendered yet, wait until it is ready.
+        const UINT64 completedValue = m_fence->GetCompletedValue();
+        if( completedValue < m_fenceValues[ m_frameIndex ] )
+        {
+            WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
+            /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
+            WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
+        }
+
+        // Set the fence value for the next frame.
+        m_fenceValues[ m_frameIndex ] = currentFenceValue + 1;
+    }
+
+    // Init state for path tracing mode.
+    void Engine::initPathTracingMode()
+    {
         // Enable the D3D12 debug layer if in debug mode.
         UINT d3d11DeviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
         D2D1_FACTORY_OPTIONS d2dFactoryOptions = {};
@@ -130,7 +286,7 @@ namespace rsmgpt
             ComPtr<IDXGIAdapter> warpAdapter;
             ThrowIfFailed( factory->EnumWarpAdapter( IID_PPV_ARGS( &warpAdapter ) ) );
 
-            ThrowIfFailed( 
+            ThrowIfFailed(
                 D3D12CreateDevice(
                     warpAdapter.Get(),
                     D3D_FEATURE_LEVEL_11_0,
@@ -146,7 +302,7 @@ namespace rsmgpt
                     IID_PPV_ARGS( &m_d3d12Device )   // D3D device object.
                     ) );
         }
-        
+
         // Create the render and compute command queues that we will be using.
         D3D12_COMMAND_QUEUE_DESC queueDesc = {};
         queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
@@ -270,8 +426,8 @@ namespace rsmgpt
 
                 // Create an RTV for the current back buffer.
                 m_pRtvHeap->addRTV(
-                    m_renderTargets[n].Get(), 
-                    nullptr, 
+                    m_renderTargets[ n ].Get(),
+                    nullptr,
                     "rtv" + std::to_string( n ) );
 
                 // Create a wrapped 11On12 resource of this back buffer. Since we are 
@@ -303,7 +459,7 @@ namespace rsmgpt
                 ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS( &m_computeCommandAllocators[ n ] ) ) );
             }
         }
-            
+
         // Create the root signatures.
         {
             // Currently know of only one graphics root parameter, i.e. the SRV to the path tracer output.
@@ -315,7 +471,7 @@ namespace rsmgpt
             UINT nDescriptors( 1 ), baseShaderRegister( 0 );
             CD3DX12_DESCRIPTOR_RANGE srvOutput( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, nDescriptors, baseShaderRegister );
             m_gfxRootSignature[ GfxSrvTable ].InitAsDescriptorTable( 1, &srvOutput, D3D12_SHADER_VISIBILITY_PIXEL );
-            
+
             // Create the static sampler desc for the point sampler in rsmgptPathTracingOutputPS.
             CD3DX12_STATIC_SAMPLER_DESC psSamplerDesc =
                 CD3DX12_STATIC_SAMPLER_DESC(
@@ -361,49 +517,80 @@ namespace rsmgpt
                 { "TEXCOORD",   0,  DXGI_FORMAT_R32G32_FLOAT,      0,   12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
             };
 
-            // Describe and create the graphics pipeline state objects (PSO).
-            D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-            psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
-            psoDesc.pRootSignature = m_gfxRootSignature.get(); //m_gfxRootSignature.Get();
-            psoDesc.VS = { g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) };
-            psoDesc.PS = { g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) };
-            psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
-            psoDesc.BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
-            psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
-            psoDesc.SampleMask = UINT_MAX;
-            psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-            psoDesc.NumRenderTargets = 1;
-            psoDesc.RTVFormats[ 0 ] = DXGI_FORMAT_R8G8B8A8_UNORM;
-            psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
-            psoDesc.SampleDesc.Count = 1;
+            switch( m_opMode )
+            {
+            case OM_PATH_TRACER:
+            {
+                // Describe and create the graphics pipeline state objects (PSO).
+                D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+                psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
+                psoDesc.pRootSignature = m_gfxRootSignature.get(); //m_gfxRootSignature.Get();
+                psoDesc.VS = { g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) };
+                psoDesc.PS = { g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) };
+                psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
+                psoDesc.BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
+                psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
+                psoDesc.SampleMask = UINT_MAX;
+                psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+                psoDesc.NumRenderTargets = 1;
+                psoDesc.RTVFormats[ 0 ] = DXGI_FORMAT_R8G8B8A8_UNORM;
+                psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
+                psoDesc.SampleDesc.Count = 1;
 
-            ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_pipelineState ) ) );
+                ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_fullScreenTri3DPSO ) ) );
 
-            // Describe and create the compute pipeline state object (PSO).
-            D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
-            computePsoDesc.pRootSignature = m_computeRootSignature.get();
-            computePsoDesc.CS = { g_prsmgptPathTracingKernelCS, _countof( g_prsmgptPathTracingKernelCS ) };
+                // Describe and create the compute pipeline state object (PSO).
+                D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
+                computePsoDesc.pRootSignature = m_computeRootSignature.get();
+                computePsoDesc.CS = { g_prsmgptPathTracingKernelCS, _countof( g_prsmgptPathTracingKernelCS ) };
 
-            ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_computeState ) ) );
+                ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_pathTracingComputePSO ) ) );
+            }
+            break;
+
+            case OM_DEBUG_ACCEL:
+            {
+                // Describe and create the graphics pipeline state objects (PSO).
+                D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+                psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
+                psoDesc.pRootSignature = m_gfxRootSignature.get(); //m_gfxRootSignature.Get();
+                psoDesc.VS = { g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) };
+                psoDesc.PS = { g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) };
+                psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
+                psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;   // Need to render in wireframe mode.
+                                                                                //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;        // Do we need to disable culling of back facing triangles?
+                psoDesc.BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
+                psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
+                psoDesc.SampleMask = UINT_MAX;
+                psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+                psoDesc.NumRenderTargets = 1;
+                psoDesc.RTVFormats[ 0 ] = DXGI_FORMAT_R8G8B8A8_UNORM;
+                psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
+                psoDesc.SampleDesc.Count = 1;
+
+                ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_debugAccel3DPSO ) ) );
+            }
+            break;
+            }
         }
 
         // Create the graphics and compute command lists.
-        ThrowIfFailed( 
-            m_d3d12Device->CreateCommandList( 
+        ThrowIfFailed(
+            m_d3d12Device->CreateCommandList(
                 0,                                          // GPU node (only 1 GPU for now)
                 D3D12_COMMAND_LIST_TYPE_DIRECT,             // Command list type
                 m_commandAllocators[ m_frameIndex ].Get(),  // Command allocator
-                m_pipelineState.Get(),                      // Pipeline state
+                m_fullScreenTri3DPSO.Get(),                      // Pipeline state
                 IID_PPV_ARGS( &m_commandList ) ) );         // Command list (output)
-        
-        ThrowIfFailed( 
-            m_d3d12Device->CreateCommandList( 
-                0, 
-                D3D12_COMMAND_LIST_TYPE_COMPUTE, 
-                m_computeCommandAllocators[ m_frameIndex ].Get(), 
-                m_computeState.Get(), 
+
+        ThrowIfFailed(
+            m_d3d12Device->CreateCommandList(
+                0,
+                D3D12_COMMAND_LIST_TYPE_COMPUTE,
+                m_computeCommandAllocators[ m_frameIndex ].Get(),
+                m_pathTracingComputePSO.Get(),
                 IID_PPV_ARGS( &m_computeCommandList ) ) );
-        
+
         ThrowIfFailed( m_computeCommandList->Close() );
 
         // Create D2D/DWrite objects for rendering text.
@@ -456,9 +643,9 @@ namespace rsmgpt
             //  TODO: The linked article specifies how to do this w/o a vertex buffer. Should try that once we know the full screen triangle method works.
             Vertex triangleVertices[] =
             {
-                { { -1.f, -1.f, 0.0f }, { 0.f, 0.f } },   // Bottom left
-                { { -1.f, 3.0f, 0.0f }, { 0.f, 2.f } },   // Top left
-                { { 3.0f, -1.f, 0.0f }, { 2.f, 0.f } }    // Bottom right
+                { { -1.f, -1.f, 0.0f },{ 0.f, 0.f } },   // Bottom left
+                { { -1.f, 3.0f, 0.0f },{ 0.f, 2.f } },   // Top left
+                { { 3.0f, -1.f, 0.0f },{ 2.f, 0.f } }    // Bottom right
             };
             const UINT vertexBufferSize = sizeof( triangleVertices );
 
@@ -470,13 +657,13 @@ namespace rsmgpt
                 vertexBufferSize,
                 vertexBufferUpload,
                 reinterpret_cast<void*>( triangleVertices ) );
-            
+
             // Add a resource barrier to indicate that the vertex buffer is transitioning from a copy dest to being used as a vertex buffer.
-            m_commandList->ResourceBarrier( 
-                1, 
-                &CD3DX12_RESOURCE_BARRIER::Transition( 
-                    m_vertexBuffer.Get(), 
-                    D3D12_RESOURCE_STATE_COPY_DEST, 
+            m_commandList->ResourceBarrier(
+                1,
+                &CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_vertexBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
                     D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER ) );
 
             // Initialize the vertex buffer view.
@@ -500,7 +687,7 @@ namespace rsmgpt
             ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                 &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
                 D3D12_HEAP_FLAG_NONE,
-                &CD3DX12_RESOURCE_DESC::Tex2D( 
+                &CD3DX12_RESOURCE_DESC::Tex2D(
                     DXGI_FORMAT_D32_FLOAT,                      // Texture format.
                     m_width,                                    // Texture width.
                     m_height,                                   // Texture height.
@@ -536,7 +723,7 @@ namespace rsmgpt
             const float
                 focalLength( 1.f ),
                 lensRadius( 1.f ),
-                fWidth( static_cast<float>( m_width ) ), 
+                fWidth( static_cast<float>( m_width ) ),
                 fHeight( static_cast<float>( m_height ) ),
                 fov( .25f * XM_PI /*90*/ ),
                 aspectRatio( fWidth / fHeight ),
@@ -586,22 +773,22 @@ namespace rsmgpt
                 Mat4::CreateScale( fWidth, fHeight, 1.f ) );    // Transforms to raster coords [0,width/height-1]
             const Mat4 rasterToWorld( ( worldToCamera * cameraToScreen * screenToRaster ).Invert() );    // Inverse transform from raster space to camera space.  
 
-            // TODO: Remove when done testing.
-            //const Mat4 rasterToWorld( /*screenToRaster.Invert()*/ cameraToScreen );    // Transforms to raster coords [0,width/height-1]
+                                                                                                         // TODO: Remove when done testing.
+                                                                                                         //const Mat4 rasterToWorld( /*screenToRaster.Invert()*/ cameraToScreen );    // Transforms to raster coords [0,width/height-1]
 
-            //// Test transform a raster space coord to camera space.
-            //Vec3 pt( 640, 512, nearPlane );
-            ////Vec4 pt( 10, 10, 0, 1 );
-            //Vec3 res = Vec3::Transform( pt, rasterToWorld );
-            //res.Normalize();
-            
-            ////Math::Vector4 res = Math::Vector4::Transform( Math::Vector4( 10, 0, 0, 1 ), /*Mat4::Identity*/ cameraToScreen );       
-                                    
-            //// Initialize the constant buffer data.
-            //m_cbPerFrame.gRasterToWorld = rasterToWorld.Transpose();
+                                                                                                         //// Test transform a raster space coord to camera space.
+                                                                                                         //Vec3 pt( 640, 512, nearPlane );
+                                                                                                         ////Vec4 pt( 10, 10, 0, 1 );
+                                                                                                         //Vec3 res = Vec3::Transform( pt, rasterToWorld );
+                                                                                                         //res.Normalize();
+
+                                                                                                         ////Math::Vector4 res = Math::Vector4::Transform( Math::Vector4( 10, 0, 0, 1 ), /*Mat4::Identity*/ cameraToScreen );       
+
+                                                                                                         //// Initialize the constant buffer data.
+                                                                                                         //m_cbPerFrame.gRasterToWorld = rasterToWorld.Transpose();
 #endif // 0
 
-            // Get the GPU address of m_cbPerFrame.
+                                                                                                         // Get the GPU address of m_cbPerFrame.
             auto cbPerFrameGpuVA = m_constantBuffer->GetGPUVirtualAddress();
 
             // Create the CBV for m_cbPerFrame. Note that CreateConstantBufferView returns nothing as it creates the CBV at the location
@@ -613,7 +800,7 @@ namespace rsmgpt
 
             // Map the constant buffers. We don't unmap this until the app closes.
             // Keeping things mapped for the lifetime of the resource is okay.
-            ThrowIfFailed( m_constantBuffer->Map( 0, nullptr, reinterpret_cast<void**>( &m_pCbvDataBegin ) ) );                        
+            ThrowIfFailed( m_constantBuffer->Map( 0, nullptr, reinterpret_cast<void**>( &m_pCbvDataBegin ) ) );
         }
 
         // Load the test model.
@@ -677,7 +864,7 @@ namespace rsmgpt
             pathTracerOutputSrvDesc.Texture2D.ResourceMinLODClamp = 0.f;
             m_pCsuHeap->addSRV( m_pathTracerOutput.Get(), &pathTracerOutputSrvDesc, "gptOutput" );
         }
-               
+
         // Close the command list and execute it to begin the vertex buffer copy into
         // the default heap.
         ThrowIfFailed( m_commandList->Close() );
@@ -700,79 +887,19 @@ namespace rsmgpt
             // Wait for the command list to execute; we are reusing the same command 
             // list in our main loop but for now, we just want to wait for setup to 
             // complete before continuing.
-            WaitForGpu();
+            waitForGpu();
         }
-	}
+    }
 
-	void Engine::OnUpdate()
-	{
-        // Move the camera.
-        if( m_pCamera.get() )
-        {
-            if( GetAsyncKeyState( 'A' ) & 0x8000 )	m_pCamera->slide( -m_pCamera->motionFactor(), 0, 0 );	// move left	
-            if( GetAsyncKeyState( 'D' ) & 0x8000 )	m_pCamera->slide( m_pCamera->motionFactor(), 0, 0 );	// move right
-            if( GetAsyncKeyState( 'W' ) & 0x8000 )	m_pCamera->slide( 0, 0, m_pCamera->motionFactor() );		// move forward
-            if( GetAsyncKeyState( 'S' ) & 0x8000 )	m_pCamera->slide( 0, 0, -m_pCamera->motionFactor() );		// move backward
-            if( GetAsyncKeyState( 'Q' ) & 0x8000 )	m_pCamera->slide( 0, m_pCamera->motionFactor(), 0 );			// move up
-            if( GetAsyncKeyState( 'E' ) & 0x8000 )	m_pCamera->slide( 0, -m_pCamera->motionFactor(), 0 );			// move down
+    // Init state for debug accel mode.
+    void Engine::initDebugAccelMode()
+    {
+        // TODO: Add implementation here.
+    }
 
-            if( GetAsyncKeyState( VK_NUMPAD4 ) & 0x8000 )	m_pCamera->rotateY( -m_pCamera->rotationFactor() );	// yaw left
-            if( GetAsyncKeyState( VK_NUMPAD6 ) & 0x8000 )	m_pCamera->rotateY( m_pCamera->rotationFactor() );	// yaw right
-            if( GetAsyncKeyState( VK_NUMPAD8 ) & 0x8000 )	m_pCamera->pitch( -m_pCamera->rotationFactor() );		// pitch up
-            if( GetAsyncKeyState( VK_NUMPAD5 ) & 0x8000 )	m_pCamera->pitch( m_pCamera->rotationFactor() );		// pitch down
-
-            // Zoom in/out according to the keyboard input
-            if( GetAsyncKeyState( VK_NUMPAD1 ) & 0x8000 )	m_pCamera->zoomOut();	// zoom out
-            if( GetAsyncKeyState( VK_NUMPAD3 ) & 0x8000 )	m_pCamera->zoomIn();	// zoom in
-
-            // NOTE: Disabling rolls as we don't really need them.
-#if 0
-            if( GetAsyncKeyState( VK_NUMPAD7 ) & 0x8000 )	m_pCamera->roll( m_pCamera->rotationFactor() );			// roll left
-            if( GetAsyncKeyState( VK_NUMPAD9 ) & 0x8000 )	m_pCamera->roll( -m_pCamera->rotationFactor() );			// roll right
-#endif	// 0            
-        }
-
-        // Compute the time spent in the path tracing pass.
-        {
-            // The oldest frame is the one that was previously rendered.
-            const UINT oldestFrameIndex = ( m_frameIndex + 1 ) % FrameCount, completedFenceValue = m_fence->GetCompletedValue();
-            
-            // The oldest frame is the current frame index and it will always be complete due to the wait in MoveToNextFrame().
-            //assert( m_fenceValues[ oldestFrameIndex ] <= m_fence->GetCompletedValue() );
-
-            // Get the timestamp values from the result buffers.
-            D3D12_RANGE readRange = {};
-            const D3D12_RANGE emptyRange = {};
-
-            //UINT64* ppMovingAverage[] = { m_drawTimes, m_blurTimes };
-            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
-            {
-                readRange.Begin = 2 * oldestFrameIndex * sizeof( UINT64 );
-                readRange.End = readRange.Begin + 2 * sizeof( UINT64 );
-
-                void* pData = nullptr;
-                ThrowIfFailed( m_timestampResultBuffer->Map( 0, &readRange, &pData ) );
-
-                const UINT64* pTimestamps = reinterpret_cast<UINT64*>( static_cast<UINT8*>( pData ) + readRange.Begin );
-                const UINT64 timeStampDelta = pTimestamps[ 1 ] - pTimestamps[ 0 ];
-
-                // Unmap with an empty range (written range).
-                m_timestampResultBuffer->Unmap( 0, &emptyRange );
-
-                // Calculate the GPU execution time in microseconds.
-                m_pathTracingTime = ( timeStampDelta * 1000000 ) / m_computeCommandQueueTimestampFrequency;
-                //ppMovingAverage[ i ][ m_currentTimesIndex ] = gpuTimeUS;
-            }
-
-            // Move to the next index.
-            //m_currentTimesIndex = ( m_currentTimesIndex + 1 ) % MovingAverageFrameCount;
-        }
-
-		// TODO: Add implementation here.
-	}
-
-	void Engine::OnRender()
-	{
+    // Render method for path tracing mode.
+    void Engine::renderPathTracingMode()
+    {
         // Command list allocators can only be reset when the associated 
         // command lists have finished execution on the GPU; apps should use 
         // fences to determine GPU execution progress.
@@ -782,8 +909,8 @@ namespace rsmgpt
         // However, when ExecuteCommandList() is called on a particular command 
         // list, that command list can then be reset at any time and must be before 
         // re-recording.
-        ThrowIfFailed( m_computeCommandList->Reset( m_computeCommandAllocators[ m_frameIndex ].Get(), m_computeState.Get() ) );
-        ThrowIfFailed( m_commandList->Reset( m_commandAllocators[ m_frameIndex ].Get(), m_pipelineState.Get() ) );
+        ThrowIfFailed( m_computeCommandList->Reset( m_computeCommandAllocators[ m_frameIndex ].Get(), m_pathTracingComputePSO.Get() ) );
+        ThrowIfFailed( m_commandList->Reset( m_commandAllocators[ m_frameIndex ].Get(), m_fullScreenTri3DPSO.Get() ) );
 
         // Get a timestamp at the start of the compute command list.
         const UINT timestampHeapIndex = 2 * m_frameIndex;
@@ -804,8 +931,8 @@ namespace rsmgpt
         m_cbPerFrame.gCamPos = camPos;
         m_cbPerFrame.gNumFaces = static_cast<unsigned>( m_pModel->numFaces() );
         memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );   // This will be updated at runtime.
-        
-        // Set the compute pipeline bindings.
+
+                                                                                  // Set the compute pipeline bindings.
         m_computeCommandList->SetComputeRootConstantBufferView( CbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
         m_computeCommandList->SetComputeRootDescriptorTable(
             ComputeSrvTable,
@@ -814,7 +941,7 @@ namespace rsmgpt
             ComputeUavTable,
             m_pCsuHeap->getGPUHandle( "gOutput" ) );    // Set the UAV table.
 
-        // Dispatch enough thread groups to cover the entire screen.
+                                                        // Dispatch enough thread groups to cover the entire screen.
         m_computeCommandList->Dispatch(
             m_width / ComputeBlockSize,
             m_height / ComputeBlockSize,
@@ -822,12 +949,12 @@ namespace rsmgpt
 
         // Get a timestamp at the end of the compute command list and resolve the query data.
         m_computeCommandList->EndQuery( m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, timestampHeapIndex + 1 );
-        m_computeCommandList->ResolveQueryData( 
-            m_timestampQueryHeap.Get(), 
-            D3D12_QUERY_TYPE_TIMESTAMP, 
-            timestampHeapIndex, 
-            2, 
-            m_timestampResultBuffer.Get(), 
+        m_computeCommandList->ResolveQueryData(
+            m_timestampQueryHeap.Get(),
+            D3D12_QUERY_TYPE_TIMESTAMP,
+            timestampHeapIndex,
+            2,
+            m_timestampResultBuffer.Get(),
             timestampHeapIndex * sizeof( UINT64 ) );
 
         // Close the compute command list and execute the compute work.
@@ -865,7 +992,7 @@ namespace rsmgpt
             m_commandList->ResourceBarrier( 1, &rtBarrier );
 
             // Get handles to the current back buffer's RTV and the DSV and bind them to the graphics pipeline.
-            const auto rtvHandle( m_pRtvHeap->getCPUHandle( "rtv" + std::to_string(m_frameIndex) ) );
+            const auto rtvHandle( m_pRtvHeap->getCPUHandle( "rtv" + std::to_string( m_frameIndex ) ) );
             const auto dsvHandle( m_pDsvHeap->getCPUHandle( "dsv" ) );
             m_commandList->OMSetRenderTargets( 1, &rtvHandle, FALSE, &dsvHandle );
 
@@ -883,7 +1010,7 @@ namespace rsmgpt
                 GfxSrvTable,
                 m_pCsuHeap->getGPUHandle( "gptOutput" ) ); // Set the UAV table.
 
-            // Add a barrier indicating that the path tracer output is going to be used as an SRV.
+                                                           // Add a barrier indicating that the path tracer output is going to be used as an SRV.
             D3D12_RESOURCE_BARRIER ptoBarrier =
                 CD3DX12_RESOURCE_BARRIER::Transition(
                     m_pathTracerOutput.Get(),
@@ -898,7 +1025,7 @@ namespace rsmgpt
             ptoBarrier.Transition.StateBefore = ptoBarrier.Transition.StateAfter;
             ptoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
             m_commandList->ResourceBarrier( 1, &ptoBarrier );
-            
+
             // NOTE: Shouldn't do this since we're rendering text on top of this render target.
 #if 0
             //// Indicate that the back buffer will now be used to present.
@@ -915,7 +1042,7 @@ namespace rsmgpt
         // Execute the rendering work only when the compute work is complete.
         ppCommandLists[ 0 ] = m_commandList.Get();
         m_commandQueue->Wait( m_computeFence.Get(), m_fenceValues[ m_frameIndex ] );
-        m_commandQueue->ExecuteCommandLists( 
+        m_commandQueue->ExecuteCommandLists(
             static_cast<UINT>( ppCommandLists.size() ),
             ppCommandLists.data() );
 
@@ -924,15 +1051,15 @@ namespace rsmgpt
             D2D1_SIZE_F rtSize = m_d2dRenderTargets[ m_frameIndex ]->GetSize();
             /*D2D1_RECT_F textRect = D2D1::RectF( 0, 0, rtSize.width, rtSize.height );*/
             D2D1_RECT_F textRect = D2D1::RectF( 0, 0, 900, 200 );
-            std::wstring text = 
-                L"Camera position: (" + 
-                std::to_wstring( camPos.x ) + 
-                L", " + 
-                std::to_wstring( camPos.y ) + 
-                L", " + 
-                std::to_wstring( camPos.z ) + 
-                L")\nPath tracing time = " + 
-                std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) + 
+            std::wstring text =
+                L"Camera position: (" +
+                std::to_wstring( camPos.x ) +
+                L", " +
+                std::to_wstring( camPos.y ) +
+                L", " +
+                std::to_wstring( camPos.z ) +
+                L")\nPath tracing time = " +
+                std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) +
                 L" ms";
             //static const WCHAR text[] = L"11On12";
 
@@ -965,64 +1092,13 @@ namespace rsmgpt
         // Present the frame.
         ThrowIfFailed( m_swapChain->Present( 1, 0 ) );
 
-        MoveToNextFrame();
-	}
-
-	void Engine::OnDestroy()
-	{
-        // Wait for the GPU to be done with all resources.
-        WaitForGpu();
-
-        CloseHandle( m_fenceEvent );
-	}
-
-	bool Engine::OnEvent(MSG msg)
-	{
-		// TODO: Add implementation here.
-
-		return true;
-	}
-
-    void Engine::WaitForGpu()
-    {
-        // Schedule a Signal command in the queue.
-        ThrowIfFailed( m_commandQueue->Signal( m_fence.Get(), m_fenceValues[ m_frameIndex ] ) );
-
-        // Wait until the fence has been processed.
-        WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
-        /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
-        WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
-
-        // Increment the fence value for the current frame.
-        m_fenceValues[ m_frameIndex ]++;
+        moveToNextFrame();
     }
 
-    void Engine::CreateShaderBlob( const char* shaderName, ID3DBlob** ppBlob )
+    // Render method for acceleration structure mode.
+    void Engine::renderDebugAccelMode()
     {
-        ThrowIfFailed( D3DReadFileToBlob( path( m_shadersDir / path( shaderName ) ).c_str(), ppBlob ) );
-    }
-
-    // Prepare to render the next frame.
-    void Engine::MoveToNextFrame()
-    {
-        // Schedule a Signal command in the queue.
-        const UINT64 currentFenceValue = m_fenceValues[ m_frameIndex ];
-        ThrowIfFailed( m_commandQueue->Signal( m_fence.Get(), currentFenceValue ) );
-
-        // Update the frame index.
-        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
-
-        // If the next frame is not ready to be rendered yet, wait until it is ready.
-        const UINT64 completedValue = m_fence->GetCompletedValue();
-        if( completedValue < m_fenceValues[ m_frameIndex ] )
-        {
-            WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
-            /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
-            WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
-        }
-
-        // Set the fence value for the next frame.
-        m_fenceValues[ m_frameIndex ] = currentFenceValue + 1;
+        // TODO: Add implementation here.
     }
 
 }	// end of namespace rsmgpt
