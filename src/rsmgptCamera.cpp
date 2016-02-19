@@ -237,13 +237,10 @@ namespace rsmgpt
     {
         // create a trans matrix to rotate by angle about rotAxis
         Mat4 trans = Mat4::CreateFromAxisAngle( rotAxis, angle );
-        //D3DXMatrixRotationAxis(&trans, &rotAxis, angle);	// @TODO: remove when done testing
 
         // rotate axis1 and axis2 using trans
         axis1 = Vec3::Transform( axis1, trans );
         axis2 = Vec3::Transform( axis2, trans );
-        /*D3DXVec3TransformCoord(&axis1, &axis1, &trans);
-        D3DXVec3TransformCoord(&axis2, &axis2, &trans);*/
 
         // update the view matrix
         updateView();
