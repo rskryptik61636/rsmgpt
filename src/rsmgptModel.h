@@ -68,23 +68,50 @@ public:
         const path modelPath,
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
-        const unsigned int 
-        uiImportOptions = aiProcess_MakeLeftHanded | aiProcess_FlipWindingOrder |
-        aiProcess_FlipUVs | aiProcessPreset_TargetRealtime_Quality );
+        const unsigned int uiImportOptions = 
+            aiProcess_MakeLeftHanded | 
+            aiProcess_FlipWindingOrder |
+            aiProcess_FlipUVs | 
+            aiProcessPreset_TargetRealtime_Quality );
+
+    // Draws the model.
+    void draw( const Mat4& viewProj, const UINT rootParameterIndex, const UINT rootParameterRegisterSpace, ID3D12GraphicsCommandList* pCmdList );
 
     // Accessor function for the model's root node. Required to traverse the node tree in order to draw the model.
     const ModelNode& rootNode() const { return m_modelRootNode; }
 
-    // Accessor function for the model's vertex and index buffer resources.
+    // Accessor function for the model's vertex and index buffer resources and view.
     ID3D12Resource* vertexBuffer() const { return m_pModelVertexBuffer.Get(); }
+    const D3D12_VERTEX_BUFFER_VIEW* const vertexBufferView() const { return &m_modelVertexBufferView; }
+
     ID3D12Resource* indexBuffer() const { return m_pModelIndexBuffer.Get(); }
+    const D3D12_INDEX_BUFFER_VIEW* const indexBufferView() const { return &m_modelIndexBufferView; }
 
     // Accessor functions for the no. of vertices, indices and triangle faces.
     std::size_t numVertices() const { return m_modelVertices.size(); }
     std::size_t numIndices() const { return m_modelIndices.size(); }
     std::size_t numFaces() const { return m_numFaces; }
 
+    // Returns the input element desc for model vertices.
+    static std::array<D3D12_INPUT_ELEMENT_DESC, 6> inputElementDesc()
+    {
+        static std::array<D3D12_INPUT_ELEMENT_DESC, 6> inputElementDescs =
+        {
+            {   "POSITION",   0,  DXGI_FORMAT_R32G32B32_FLOAT,    0,   0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0,
+                "NORMAL",     0,  DXGI_FORMAT_R32G32B32_FLOAT,    0,   12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0,
+                "TEXCOORD",   0,  DXGI_FORMAT_R32G32_FLOAT,       0,   24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0,
+                "TANGENT",    0,  DXGI_FORMAT_R32G32B32_FLOAT,    0,   32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0,
+                "BINORMAL",   0,  DXGI_FORMAT_R32G32B32_FLOAT,    0,   44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0,
+                "COLOR",      0,  DXGI_FORMAT_R32G32B32A32_FLOAT, 0,   56, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0    }
+        };
+
+        return inputElementDescs;
+    }
+
 private:
+
+    // Recursive draw helper function.
+    void recursiveDrawHelper( const ModelNode& currNode, const Mat4& viewProj, const UINT rootParameterIndex, const UINT rootParameterRegisterSpace, ID3D12GraphicsCommandList* pCmdList, std::vector<Mat4>& transStack );
 
     // Recursive function which constructs the model's node tree.
     void recursiveNodeConstructor( aiNode* pCurrNode, ModelNode& currNode );
@@ -102,10 +129,15 @@ private:
     std::vector<ModelVertex> m_modelVertices;
     std::vector<unsigned int> m_modelIndices;
     unsigned int m_numFaces;
+
     ComPtr<ID3D12Resource> m_pModelVertexBuffer;
     ComPtr<ID3D12Resource> m_pModelVertexUpload;
+    D3D12_VERTEX_BUFFER_VIEW m_modelVertexBufferView;
+    
     ComPtr<ID3D12Resource> m_pModelIndexBuffer;
     ComPtr<ID3D12Resource> m_pModelIndexUpload;
+    D3D12_INDEX_BUFFER_VIEW m_modelIndexBufferView;
+    
     std::array<D3D12_RESOURCE_BARRIER, 2> m_srvBarriers;
 
     // Model meshes

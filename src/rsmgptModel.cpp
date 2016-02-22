@@ -139,22 +139,35 @@ namespace rsmgpt
 
         // @TODO: add implementation here
 
-        // Create the vertex and index buffers.
+        // Create the vertex buffer.
+        const size_t vertexBufferSize = m_modelVertices.size() * sizeof( ModelVertex );
         createBuffer(
             pDevice,
             pCommandList,
             m_pModelVertexBuffer,
-            m_modelVertices.size() * sizeof( ModelVertex ),
+            vertexBufferSize,
             m_pModelVertexUpload,
             m_modelVertices.data() );
 
+        // Initialize the vertex buffer view.
+        m_modelVertexBufferView.BufferLocation = m_pModelVertexBuffer->GetGPUVirtualAddress();
+        m_modelVertexBufferView.StrideInBytes = sizeof( ModelVertex );
+        m_modelVertexBufferView.SizeInBytes = static_cast<UINT>( vertexBufferSize );
+
+        // Create the index buffer.
+        const size_t indexBufferSize( m_modelIndices.size() * sizeof( unsigned int ) );
         createBuffer(
             pDevice,
             pCommandList,
             m_pModelIndexBuffer,
-            m_modelIndices.size() * sizeof( unsigned int ),
+            indexBufferSize,
             m_pModelIndexUpload,
             m_modelIndices.data() );
+
+        // Initialize the index buffer view.
+        m_modelIndexBufferView.BufferLocation = m_pModelIndexBuffer->GetGPUVirtualAddress();
+        m_modelIndexBufferView.SizeInBytes = static_cast<UINT>( indexBufferSize );
+        m_modelIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
         // Add resource barriers to indicate that the vertex and index buffers are transitioning from copy dests to srv-s.
         m_srvBarriers = {
@@ -202,5 +215,95 @@ namespace rsmgpt
             for( auto i = 0; i < currNode.childNodes.size(); ++i )
                 recursiveNodeConstructor( pCurrNode->mChildren[ i ], currNode.childNodes[ i ] );
         }
+    }
+
+    // Draws the model.
+    void Model::draw( 
+        const Mat4& viewProj, 
+        const UINT rootParameterIndex, 
+        const UINT rootParameterRegisterSpace, 
+        ID3D12GraphicsCommandList* pCmdList )
+    {
+        // Set the model's vertex and index buffers.
+        pCmdList->IASetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
+        pCmdList->IASetVertexBuffers(
+            0,
+            1,
+            &m_modelVertexBufferView );
+
+        pCmdList->IASetIndexBuffer( &m_modelIndexBufferView );
+
+        // Create an transformation stack with enough space for the transformations of all the child nodes as well as that of the root node.
+        std::vector<Mat4> transStack;
+        transStack.reserve( m_modelRootNode.childNodes.size() + 1 );
+
+        // Invoke the recursive draw helper function.
+        recursiveDrawHelper( 
+            m_modelRootNode, 
+            viewProj, 
+            rootParameterIndex, 
+            rootParameterRegisterSpace, 
+            pCmdList, 
+            transStack );
+    }
+
+    // Recursive draw helper function.
+    void Model::recursiveDrawHelper( 
+        const ModelNode& currNode, 
+        const Mat4& viewProj, 
+        const UINT rootParameterIndex, 
+        const UINT rootParameterRegisterSpace,
+        ID3D12GraphicsCommandList* pCmdList, 
+        std::vector<Mat4>& transStack )
+    {
+        // Push the current node's transformation onto the transformation stack.
+        transStack.push_back( currNode.transformation );
+
+        // Draw all the meshes belonging to the current node.
+        const auto &currMeshes = currNode.meshIndexes;
+        for( auto i = 0; i < currMeshes.size(); ++i )
+        {
+            // Compute the current world transformation matrix by multiplying by all the matrices
+            // in the transformation stack in reverse.
+            Mat4 world( Mat4::Identity );
+            for( auto j = transStack.rbegin(); j != transStack.rend(); ++j )
+            {
+                world *= *j;
+            }
+            
+            // Compute the current WVP matrix. Remember that the matrix has to be transposed before binding in the shader.
+            const Mat4 wvp( Mat4( world * viewProj ).Transpose() );
+
+            // TODO: Need to implement support for descriptor tables/views if necessary.
+            
+            // Set the debug VS constants.
+            pCmdList->SetGraphicsRoot32BitConstants(
+                rootParameterIndex,
+                sizeof( Mat4 ) / sizeof( float ),
+                &wvp,
+                rootParameterRegisterSpace );
+
+            // Draw the current mesh.
+            const auto meshIndex = currMeshes[ i ];
+            pCmdList->DrawIndexedInstanced(
+                m_modelMeshes[ meshIndex ].indexCount,
+                1,
+                m_modelMeshes[ meshIndex ].indexStart,
+                m_modelMeshes[ meshIndex ].vertexStart,
+                0 );            
+        }
+
+        // Draw the meshes of all the children of the current node.
+        for( std::size_t i = 0; i < currNode.childNodes.size(); ++i )
+            recursiveDrawHelper( 
+                currNode.childNodes[ i ], 
+                viewProj, 
+                rootParameterIndex, 
+                rootParameterRegisterSpace,
+                pCmdList, 
+                transStack );
+
+        // Pop the current node's transformation from the stack.
+        transStack.pop_back();
     }
 }
