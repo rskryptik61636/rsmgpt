@@ -28,7 +28,7 @@
 #include "rsmgptCamera.h"
 #include "rsmgptModel.h"
 
-#include <array>
+#include <functional>
 
 #if 0
 #include <GameCore.h>
@@ -86,8 +86,9 @@ namespace rsmgpt {
         static const UINT FrameCount = 2;   // TODO: Rename to m_FrameCount once we've got whatever code we need from the D3D12 samples.
         static const UINT ComputeBlockSize = 16;
 
-        // Operation mode.
+        // Operation mode and associated function pointers.
         OperationMode m_opMode;
+        std::function<void()> m_initMethod, m_renderMethod;
 
         // Vertex definition.
         struct Vertex
@@ -97,7 +98,7 @@ namespace rsmgpt {
         };
 
         // Per frame constants.
-        struct ConstantBufferData
+        struct PTCbPerFrame
         {
             Mat4        gRasterToWorld; // Raster to world space transformation matrix.
             Vec3        gCamPos;        // Camera position.
@@ -106,41 +107,51 @@ namespace rsmgpt {
             float   pad[ 44 ];         // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
-        // Graphics root signature parameter offsets.
-        enum GraphicsRootParameters
+        // Path tracing mode graphics root signature parameter offsets.
+        enum PTGfxRootParameters
         {
-            GfxSrvTable,                        // SRV to the path tracer's render target
-            GraphicsRootParametersCount
+            PTGfxSrvTable,                        // SRV to the path tracer's render target
+            PTGfxRootParametersCount
         };
 
-        // Compute root signature parameter offsets.
-        enum ComputeRootParameters
+        // Path tracing mode compute root signature parameter offsets.
+        enum PTComputeRootParameters
         {
-            CbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
-            ComputeSrvTable,            // Srvs for the vertex and index structured buffers.
-            ComputeUavTable,            // Uav for the path tracing output to be rendered.    
-            ComputeRootParametersCount
+            PTCbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
+            PTComputeSrvTable,            // Srvs for the vertex and index structured buffers.
+            PTComputeUavTable,            // Uav for the path tracing output to be rendered.    
+            PTComputeRootParametersCount
         };
 
-        // CBV/SRV/UAV desciptor heap offsets.
-        enum HeapOffsets
+        // Path tracing mode CBV/SRV/UAV desciptor heap offsets.
+        enum PTHeapOffsets
         {
-            ComputeCbvOffset = 0,                                       // Path tracing kernel constant buffer.
-            ComputeSrvOffset = ComputeCbvOffset + 1,                    // Path tracing kernel vertex and index buffer SRVs.
-            ComputeUavOffset = ComputeSrvOffset + 2,                    // Path tracing kernel render output UAV.
-            GfxSrvOffset = ComputeUavOffset + 1,                        // Path tracing kernel render output SRV (used to finally display the rendered output).
-            CbvSrvUavDescriptorCountPerFrame = GfxSrvOffset + 1
+            PTComputeCbvOffset = 0,                                       // Path tracing kernel constant buffer.
+            PTComputeSrvOffset = PTComputeCbvOffset + 1,                    // Path tracing kernel vertex and index buffer SRVs.
+            PTComputeUavOffset = PTComputeSrvOffset + 2,                    // Path tracing kernel render output UAV.
+            PTGfxSrvOffset = PTComputeUavOffset + 1,                        // Path tracing kernel render output SRV (used to finally display the rendered output).
+            PTCbvSrvUavDescriptorCountPerFrame = PTGfxSrvOffset + 1
+        };
+
+        // Debug mode graphics root signature parameter offsets.
+        enum DebugGfxRootParameters
+        {
+            DebugGfxVSBasicTrans,                        // Debug VS BasicTrans constant buffer which is bound to bind slot 0 and register space 0.
+            DebugGfxPSBasicOutput,                       // Debug PS BasicOutput constant buffer which is bound to bind slot 0 and register space 1.
+            DebugGfxRootParametersCount
         };
 
         // Each triangle gets its own constant buffer per frame.
-        std::vector<ConstantBufferData> m_constantBufferData;
+        std::vector<PTCbPerFrame> m_constantBufferData;
         UINT8* m_pCbvDataBegin;
 
-        // Pipeline objects.
+        // Common pipeline objects.
         D3D12_VIEWPORT m_viewport;
         D3D12_RECT m_scissorRect;
-        ComPtr<IDXGISwapChain3> m_swapChain;
+        
+        // Path tracing pipeline objects.
         ComPtr<ID3D12Device> m_d3d12Device;
+        ComPtr<IDXGISwapChain3> m_swapChain;
         ComPtr<ID3D11DeviceContext> m_d3d11DeviceContext;
         ComPtr<ID3D11On12Device> m_d3d11On12Device;
         ComPtr<IDWriteFactory> m_dWriteFactory;
@@ -160,6 +171,7 @@ namespace rsmgpt {
         CsuDescriptorHeapPtr m_pCsuHeap;
         RtvDescriptorHeapPtr m_pRtvHeap;
         DsvDescriptorHeapPtr m_pDsvHeap;
+
         UINT m_frameIndex;
 
         // Synchronization objects.
@@ -187,8 +199,12 @@ namespace rsmgpt {
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
         ModelPtr m_pModel;
 
-        // Camera object.
-        PerspectiveCameraPtr m_pCamera;
+        // Camera objects.
+        PTPerspectiveCameraPtr m_pPTPersepectiveCamera;
+        DebugPerspectiveCameraPtr m_pDebugPerspectiveCamera;
+
+        // Asset paths.
+        path m_shadersDir;
 
         // TODO: Resurrect in case we decide to use execute indirect at some point.
 #if 0
@@ -219,8 +235,6 @@ namespace rsmgpt {
 
 #endif // 0
 
-        // Asset paths.
-        path m_shadersDir;        
     };
 
 #if 0
@@ -251,7 +265,7 @@ namespace rsmgpt {
 
         // Per frame constants.
         // NOTE: MiniEngine requires the struct to be 16-byte aligned.
-        /*__declspec( align( 16 ) )*/ struct ConstantBufferData
+        /*__declspec( align( 16 ) )*/ struct PTCbPerFrame
         {
             Vec3    gCamPos;            // Camera position.
             float   gCamAspectRatio;    // Camera aspect ratio.
@@ -261,18 +275,18 @@ namespace rsmgpt {
         } m_cbPerFrame;
 
         // Graphics root signature parameter offsets.
-        enum GraphicsRootParameters
+        enum PTGfxRootParameters
         {
             SrvTable,                        // SRV to the path tracer's render target
-            GraphicsRootParametersCount
+            PTGfxRootParametersCount
         };
 
         // Compute root signature parameter offsets.
-        enum ComputeRootParameters
+        enum PTComputeRootParameters
         {
-            CbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
+            PTCbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
             UavTable,                   // Uav for the path tracing output to be rendered.    
-            ComputeRootParametersCount
+            PTComputeRootParametersCount
         };
 
         // Params.

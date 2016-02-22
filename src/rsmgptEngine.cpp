@@ -29,6 +29,8 @@
 #include <rsmgptPathTracingKernelCS.h>
 #include <rsmgptPathTracingOutputVS.h>
 #include <rsmgptPathTracingOutputPS.h>
+#include <rsmgptBasicVS.h>
+#include <rsmgptBasicPS.h>
 
 namespace rsmgpt
 {
@@ -39,6 +41,36 @@ namespace rsmgpt
         m_fenceValues{},
         m_frameIndex( 0 )
     {
+        // Set the init and render methods based on the operation mode.
+        switch( m_opMode )
+        {
+        case OM_PATH_TRACER:
+        {
+            m_initMethod = [=]() 
+            { 
+                this->initPathTracingMode(); 
+            };
+            m_renderMethod = [=]()
+            {
+                this->renderPathTracingMode();
+            };
+        }
+        break;
+
+        case OM_DEBUG_ACCEL:
+        {
+            m_initMethod = [=]()
+            {
+                this->initDebugAccelMode();
+            };
+            m_renderMethod = [=]()
+            {
+                this->renderDebugAccelMode();
+            };
+        }
+        break;
+        }
+
         // Set the shaders dir.
         // TODO: Need a cleaner way of doing this.
 
@@ -100,50 +132,52 @@ namespace rsmgpt
 	void Engine::OnInit()
 	{
         // Call the init function of the set operation mode.
-        switch( m_opMode )
-        {
-        case OM_PATH_TRACER:
-            initPathTracingMode();
-            break;
-
-        case OM_DEBUG_ACCEL:
-            initDebugAccelMode();
-            break;
-        }
+        m_initMethod();
 	}
 
 	void Engine::OnUpdate()
 	{
         // Move the camera.
-        if( m_pCamera.get() )
+        Camera* pCamera = nullptr;
+        switch( m_opMode )
         {
-            if( GetAsyncKeyState( 'A' ) & 0x8000 )	m_pCamera->slide( -m_pCamera->motionFactor(), 0, 0 );	// move left	
-            if( GetAsyncKeyState( 'D' ) & 0x8000 )	m_pCamera->slide( m_pCamera->motionFactor(), 0, 0 );	// move right
-            if( GetAsyncKeyState( 'W' ) & 0x8000 )	m_pCamera->slide( 0, 0, m_pCamera->motionFactor() );		// move forward
-            if( GetAsyncKeyState( 'S' ) & 0x8000 )	m_pCamera->slide( 0, 0, -m_pCamera->motionFactor() );		// move backward
-            if( GetAsyncKeyState( 'Q' ) & 0x8000 )	m_pCamera->slide( 0, m_pCamera->motionFactor(), 0 );			// move up
-            if( GetAsyncKeyState( 'E' ) & 0x8000 )	m_pCamera->slide( 0, -m_pCamera->motionFactor(), 0 );			// move down
+        case OM_PATH_TRACER:
+            pCamera = m_pPTPersepectiveCamera.get();
+            break;
 
-            if( GetAsyncKeyState( VK_NUMPAD4 ) & 0x8000 )	m_pCamera->rotateY( -m_pCamera->rotationFactor() );	// yaw left
-            if( GetAsyncKeyState( VK_NUMPAD6 ) & 0x8000 )	m_pCamera->rotateY( m_pCamera->rotationFactor() );	// yaw right
-            if( GetAsyncKeyState( VK_NUMPAD8 ) & 0x8000 )	m_pCamera->pitch( -m_pCamera->rotationFactor() );		// pitch up
-            if( GetAsyncKeyState( VK_NUMPAD5 ) & 0x8000 )	m_pCamera->pitch( m_pCamera->rotationFactor() );		// pitch down
+        case OM_DEBUG_ACCEL:
+            pCamera = m_pDebugPerspectiveCamera.get();
+            break;
+        }
+        if( pCamera )
+        {
+            if( GetAsyncKeyState( 'A' ) & 0x8000 )	pCamera->slide( -pCamera->motionFactor(), 0, 0 );	// move left	
+            if( GetAsyncKeyState( 'D' ) & 0x8000 )	pCamera->slide( pCamera->motionFactor(), 0, 0 );	// move right
+            if( GetAsyncKeyState( 'W' ) & 0x8000 )	pCamera->slide( 0, 0, pCamera->motionFactor() );		// move forward
+            if( GetAsyncKeyState( 'S' ) & 0x8000 )	pCamera->slide( 0, 0, -pCamera->motionFactor() );		// move backward
+            if( GetAsyncKeyState( 'Q' ) & 0x8000 )	pCamera->slide( 0, pCamera->motionFactor(), 0 );			// move up
+            if( GetAsyncKeyState( 'E' ) & 0x8000 )	pCamera->slide( 0, -pCamera->motionFactor(), 0 );			// move down
+
+            if( GetAsyncKeyState( VK_NUMPAD4 ) & 0x8000 )	pCamera->rotateY( -pCamera->rotationFactor() );	// yaw left
+            if( GetAsyncKeyState( VK_NUMPAD6 ) & 0x8000 )	pCamera->rotateY( pCamera->rotationFactor() );	// yaw right
+            if( GetAsyncKeyState( VK_NUMPAD8 ) & 0x8000 )	pCamera->pitch( -pCamera->rotationFactor() );		// pitch up
+            if( GetAsyncKeyState( VK_NUMPAD5 ) & 0x8000 )	pCamera->pitch( pCamera->rotationFactor() );		// pitch down
 
             // Zoom in/out according to the keyboard input
-            if( GetAsyncKeyState( VK_NUMPAD1 ) & 0x8000 )	m_pCamera->zoomOut();	// zoom out
-            if( GetAsyncKeyState( VK_NUMPAD3 ) & 0x8000 )	m_pCamera->zoomIn();	// zoom in
+            if( GetAsyncKeyState( VK_NUMPAD1 ) & 0x8000 )	pCamera->zoomOut();	// zoom out
+            if( GetAsyncKeyState( VK_NUMPAD3 ) & 0x8000 )	pCamera->zoomIn();	// zoom in
 
             // NOTE: Disabling rolls as we don't really need them.
 #if 0
-            if( GetAsyncKeyState( VK_NUMPAD7 ) & 0x8000 )	m_pCamera->roll( m_pCamera->rotationFactor() );			// roll left
-            if( GetAsyncKeyState( VK_NUMPAD9 ) & 0x8000 )	m_pCamera->roll( -m_pCamera->rotationFactor() );			// roll right
+            if( GetAsyncKeyState( VK_NUMPAD7 ) & 0x8000 )	pCamera->roll( pCamera->rotationFactor() );			// roll left
+            if( GetAsyncKeyState( VK_NUMPAD9 ) & 0x8000 )	pCamera->roll( -pCamera->rotationFactor() );			// roll right
 #endif	// 0            
         }
 
         // Compute the time spent in the path tracing pass.
         {
             // The oldest frame is the one that was previously rendered.
-            const UINT oldestFrameIndex = ( m_frameIndex + 1 ) % FrameCount, completedFenceValue = m_fence->GetCompletedValue();
+            const UINT oldestFrameIndex = ( m_frameIndex + 1 ) % FrameCount;// , completedFenceValue = m_fence->GetCompletedValue();
             
             // The oldest frame is the current frame index and it will always be complete due to the wait in moveToNextFrame().
             //assert( m_fenceValues[ oldestFrameIndex ] <= m_fence->GetCompletedValue() );
@@ -182,16 +216,7 @@ namespace rsmgpt
 	void Engine::OnRender()
 	{
         // Call the render function of the set operation mode.
-        switch( m_opMode )
-        {
-        case OM_PATH_TRACER:
-            renderPathTracingMode();
-            break;
-
-        case OM_DEBUG_ACCEL:
-            renderDebugAccelMode();
-            break;
-        }
+        m_renderMethod();
 	}
 
 	void Engine::OnDestroy()
@@ -389,7 +414,7 @@ namespace rsmgpt
         {
             m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, FrameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
             m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
-            m_pCsuHeap.reset( new CsuDescriptorHeap( m_d3d12Device, CbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
+            m_pCsuHeap.reset( new CsuDescriptorHeap( m_d3d12Device, PTCbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
         }
 
         // Create query heaps and result buffers.
@@ -466,11 +491,11 @@ namespace rsmgpt
             // NOTE: The SRV to the path tracer output render target cannot be created as a root descriptor
             //       because it pertains to a 2d texture and root descriptors can only be created for
             //       structured and append/consume structured buffers.
-            m_gfxRootSignature.reset( GraphicsRootParametersCount, 1 );
+            m_gfxRootSignature.reset( PTGfxRootParametersCount, 1 );
 
             UINT nDescriptors( 1 ), baseShaderRegister( 0 );
             CD3DX12_DESCRIPTOR_RANGE srvOutput( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, nDescriptors, baseShaderRegister );
-            m_gfxRootSignature[ GfxSrvTable ].InitAsDescriptorTable( 1, &srvOutput, D3D12_SHADER_VISIBILITY_PIXEL );
+            m_gfxRootSignature[ PTGfxSrvTable ].InitAsDescriptorTable( 1, &srvOutput, D3D12_SHADER_VISIBILITY_PIXEL );
 
             // Create the static sampler desc for the point sampler in rsmgptPathTracingOutputPS.
             CD3DX12_STATIC_SAMPLER_DESC psSamplerDesc =
@@ -494,16 +519,16 @@ namespace rsmgpt
             m_gfxRootSignature.finalize( m_d3d12Device.Get() );
 
             // The first compute root parameters is one CBV root descriptor which corresponds to the cbPerFrame in the path tracing kernel.
-            m_computeRootSignature.reset( ComputeRootParametersCount, 0 );
-            m_computeRootSignature[ CbvCbPerFrame ].InitAsConstantBufferView( 0 );
+            m_computeRootSignature.reset( PTComputeRootParametersCount, 0 );
+            m_computeRootSignature[ PTCbvCbPerFrame ].InitAsConstantBufferView( 0 );
 
             // The second compute root parameter is a table to the model vertex and index buffer SRVs.
             CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0 );
-            m_computeRootSignature[ ComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
+            m_computeRootSignature[ PTComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
 
             // The third compute root parameter is a table to the render output UAVs.
             CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0 );
-            m_computeRootSignature[ ComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
+            m_computeRootSignature[ PTComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
             m_computeRootSignature.finalize( m_d3d12Device.Get() );
         }
 
@@ -517,61 +542,30 @@ namespace rsmgpt
                 { "TEXCOORD",   0,  DXGI_FORMAT_R32G32_FLOAT,      0,   12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
             };
 
-            switch( m_opMode )
-            {
-            case OM_PATH_TRACER:
-            {
-                // Describe and create the graphics pipeline state objects (PSO).
-                D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-                psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
-                psoDesc.pRootSignature = m_gfxRootSignature.get(); //m_gfxRootSignature.Get();
-                psoDesc.VS = { g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) };
-                psoDesc.PS = { g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) };
-                psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
-                psoDesc.BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
-                psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
-                psoDesc.SampleMask = UINT_MAX;
-                psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-                psoDesc.NumRenderTargets = 1;
-                psoDesc.RTVFormats[ 0 ] = DXGI_FORMAT_R8G8B8A8_UNORM;
-                psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
-                psoDesc.SampleDesc.Count = 1;
+            // Describe and create the graphics pipeline state objects (PSO).
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+            psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
+            psoDesc.pRootSignature = m_gfxRootSignature.get(); //m_gfxRootSignature.Get();
+            psoDesc.VS = { g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) };
+            psoDesc.PS = { g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) };
+            psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
+            psoDesc.BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
+            psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
+            psoDesc.SampleMask = UINT_MAX;
+            psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+            psoDesc.NumRenderTargets = 1;
+            psoDesc.RTVFormats[ 0 ] = DXGI_FORMAT_R8G8B8A8_UNORM;
+            psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
+            psoDesc.SampleDesc.Count = 1;
 
-                ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_fullScreenTri3DPSO ) ) );
+            ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_fullScreenTri3DPSO ) ) );
 
-                // Describe and create the compute pipeline state object (PSO).
-                D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
-                computePsoDesc.pRootSignature = m_computeRootSignature.get();
-                computePsoDesc.CS = { g_prsmgptPathTracingKernelCS, _countof( g_prsmgptPathTracingKernelCS ) };
+            // Describe and create the compute pipeline state object (PSO).
+            D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
+            computePsoDesc.pRootSignature = m_computeRootSignature.get();
+            computePsoDesc.CS = { g_prsmgptPathTracingKernelCS, _countof( g_prsmgptPathTracingKernelCS ) };
 
-                ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_pathTracingComputePSO ) ) );
-            }
-            break;
-
-            case OM_DEBUG_ACCEL:
-            {
-                // Describe and create the graphics pipeline state objects (PSO).
-                D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-                psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
-                psoDesc.pRootSignature = m_gfxRootSignature.get(); //m_gfxRootSignature.Get();
-                psoDesc.VS = { g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) };
-                psoDesc.PS = { g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) };
-                psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
-                psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;   // Need to render in wireframe mode.
-                                                                                //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;        // Do we need to disable culling of back facing triangles?
-                psoDesc.BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
-                psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
-                psoDesc.SampleMask = UINT_MAX;
-                psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-                psoDesc.NumRenderTargets = 1;
-                psoDesc.RTVFormats[ 0 ] = DXGI_FORMAT_R8G8B8A8_UNORM;
-                psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;  // TODO: Find out if we can avoid this because we don't really need a depth buffer in the render pass.
-                psoDesc.SampleDesc.Count = 1;
-
-                ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_debugAccel3DPSO ) ) );
-            }
-            break;
-            }
+            ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_pathTracingComputePSO ) ) );
         }
 
         // Create the graphics and compute command lists.
@@ -707,7 +701,7 @@ namespace rsmgpt
         // Create the constant buffers.
         {
             // We're dealing with only one constant buffer per frame.
-            const UINT constantBufferDataSize = /*FrameCount **/ sizeof( ConstantBufferData );
+            const UINT constantBufferDataSize = /*FrameCount **/ sizeof( PTCbPerFrame );
 
             // Create an upload heap for the constant buffer data.
             ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
@@ -736,8 +730,8 @@ namespace rsmgpt
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
             const Vec3 eye( 0, 0, -10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
-            m_pCamera.reset(
-                new PerspectiveCamera(
+            m_pPTPersepectiveCamera.reset(
+                new PTPerspectiveCamera(
                     eye,
                     lookAt,
                     up,
@@ -751,7 +745,7 @@ namespace rsmgpt
                     farPlane,
                     motionFactor,
                     rotationFactor ) );
-            const Mat4 rasterToWorld( m_pCamera->rasterToWorld() );
+            const Mat4 rasterToWorld( m_pPTPersepectiveCamera->rasterToWorld() );
 
             // TODO: Remove when done testing.
 #if 0
@@ -794,7 +788,7 @@ namespace rsmgpt
             // Create the CBV for m_cbPerFrame. Note that CreateConstantBufferView returns nothing as it creates the CBV at the location
             // in the descriptor heap designated by cbvDesc.BufferLocation and cpuHandle.
             D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-            cbvDesc.SizeInBytes = sizeof( ConstantBufferData );
+            cbvDesc.SizeInBytes = sizeof( PTCbPerFrame );
             cbvDesc.BufferLocation = cbPerFrameGpuVA;            // Set the buffer location of the CBV to the GPU address to the current location in the descriptor heap.
             m_pCsuHeap->addCBV( &cbvDesc, "m_cbPerFrame" );
 
@@ -894,7 +888,345 @@ namespace rsmgpt
     // Init state for debug accel mode.
     void Engine::initDebugAccelMode()
     {
-        // TODO: Add implementation here.
+        // Enable the D3D12 debug layer if in debug mode.
+        UINT d3d11DeviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+        D2D1_FACTORY_OPTIONS d2dFactoryOptions = {};
+#if defined(_DEBUG)
+
+        // Enable the D2D debug layer.
+        d2dFactoryOptions.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
+
+        // Enable the D3D11 debug layer.
+        d3d11DeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+
+        {
+            ComPtr<ID3D12Debug> debugController;
+            if( SUCCEEDED( D3D12GetDebugInterface( IID_PPV_ARGS( &debugController ) ) ) )
+            {
+                debugController->EnableDebugLayer();
+            }
+        }
+#endif
+
+        // Create a DXGIFactory and D3D12Device.
+        ComPtr<IDXGIFactory4> factory;
+        ThrowIfFailed( CreateDXGIFactory1( IID_PPV_ARGS( &factory ) ) );
+
+        // TODO: Remove when done testing.
+        //m_useWarpDevice = true;
+
+        if( m_useWarpDevice )
+        {
+            ComPtr<IDXGIAdapter> warpAdapter;
+            ThrowIfFailed( factory->EnumWarpAdapter( IID_PPV_ARGS( &warpAdapter ) ) );
+
+            ThrowIfFailed(
+                D3D12CreateDevice(
+                    warpAdapter.Get(),
+                    D3D_FEATURE_LEVEL_11_0,
+                    IID_PPV_ARGS( &m_d3d12Device )
+                    ) );
+        }
+        else
+        {
+            ThrowIfFailed(
+                D3D12CreateDevice(
+                    nullptr,                    // Video adapter. nullptr implies the default adapter.
+                    D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
+                    IID_PPV_ARGS( &m_d3d12Device )   // D3D device object.
+                    ) );
+        }
+
+        // Create the render and compute command queues that we will be using.
+        D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+        queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+        queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        ThrowIfFailed( m_d3d12Device->CreateCommandQueue( &queueDesc, IID_PPV_ARGS( &m_commandQueue ) ) );
+
+        // Describe and create the swap chain.
+        DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
+        swapChainDesc.BufferCount = FrameCount;
+        swapChainDesc.BufferDesc.Width = m_width;
+        swapChainDesc.BufferDesc.Height = m_height;
+        swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        swapChainDesc.OutputWindow = m_hwnd;
+        swapChainDesc.SampleDesc.Count = 1;
+        swapChainDesc.Windowed = TRUE;
+
+        ComPtr<IDXGISwapChain> swapChain;
+        ThrowIfFailed( factory->CreateSwapChain(
+            m_commandQueue.Get(),		// Swap chain needs the render queue so that it can force a flush on it.
+            &swapChainDesc,
+            &swapChain
+            ) );
+        ThrowIfFailed( swapChain.As( &m_swapChain ) );
+
+        // This sample does not support fullscreen transitions.
+        ThrowIfFailed( factory->MakeWindowAssociation( m_hwnd, DXGI_MWA_NO_ALT_ENTER ) );
+
+        // Set m_frameIndex to the current back buffer index.
+        m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+
+        // Create an 11 device wrapped around the 12 device and share 12's graphics command queue.
+        ComPtr<ID3D11Device> d3d11Device;
+        ThrowIfFailed( D3D11On12CreateDevice(
+            m_d3d12Device.Get(),
+            d3d11DeviceFlags,
+            nullptr,
+            0,
+            reinterpret_cast<IUnknown**>( m_commandQueue.GetAddressOf() ),
+            1,
+            0,
+            &d3d11Device,
+            &m_d3d11DeviceContext,
+            nullptr
+            ) );
+
+        // Query the 11On12 device from the 11 device.
+        ThrowIfFailed( d3d11Device.As( &m_d3d11On12Device ) );
+
+        // Create D2D/DWrite components.
+        {
+            D2D1_DEVICE_CONTEXT_OPTIONS deviceOptions = D2D1_DEVICE_CONTEXT_OPTIONS_NONE;
+            ThrowIfFailed( D2D1CreateFactory( D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof( ID2D1Factory3 ), &d2dFactoryOptions, &m_d2dFactory ) );
+            ComPtr<IDXGIDevice> dxgiDevice;
+            ThrowIfFailed( m_d3d11On12Device.As( &dxgiDevice ) );
+            ThrowIfFailed( m_d2dFactory->CreateDevice( dxgiDevice.Get(), &m_d2dDevice ) );
+            ThrowIfFailed( m_d2dDevice->CreateDeviceContext( deviceOptions, &m_d2dDeviceContext ) );
+            ThrowIfFailed( DWriteCreateFactory( DWRITE_FACTORY_TYPE_SHARED, __uuidof( IDWriteFactory ), &m_dWriteFactory ) );
+        }
+
+        // Query the desktop's dpi settings, which will be used to create
+        // D2D's render targets.
+        float dpiX;
+        float dpiY;
+        m_d2dFactory->GetDesktopDpi( &dpiX, &dpiY );
+        D2D1_BITMAP_PROPERTIES1 bitmapProperties = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            D2D1::PixelFormat( DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED ),
+            dpiX,
+            dpiY
+            );
+
+        // Create descriptor heaps.
+        {
+            m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, FrameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
+            m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
+        }
+
+        // Create query heaps and result buffers.
+        {
+            // Two timestamps for each frame.
+            const UINT resultCount = 2 * FrameCount;
+            const UINT resultBufferSize = resultCount * sizeof( UINT64 );
+
+            D3D12_QUERY_HEAP_DESC timestampHeapDesc = {};
+            timestampHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+            timestampHeapDesc.Count = resultCount;
+
+            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
+            {
+                ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
+                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
+                    D3D12_HEAP_FLAG_NONE,
+                    &CD3DX12_RESOURCE_DESC::Buffer( resultBufferSize ),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    nullptr,
+                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );
+
+                ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
+            }
+        }
+
+        // Create frame resources.
+        {
+            // Create a RTV and command allocators for each frame.
+            for( UINT n = 0; n < FrameCount; n++ )
+            {
+                // Get the backing resource of the current swap chain buffer.
+                ThrowIfFailed( m_swapChain->GetBuffer( n, IID_PPV_ARGS( &m_renderTargets[ n ] ) ) );
+
+                // Create an RTV for the current back buffer.
+                m_pRtvHeap->addRTV(
+                    m_renderTargets[ n ].Get(),
+                    nullptr,
+                    "rtv" + std::to_string( n ) );
+
+                // Create a wrapped 11On12 resource of this back buffer. Since we are 
+                // rendering all D3D12 content first and then all D2D content, we specify 
+                // the In resource state as RENDER_TARGET - because D3D12 will have last 
+                // used it in this state - and the Out resource state as PRESENT. When 
+                // ReleaseWrappedResources() is called on the 11On12 device, the resource 
+                // will be transitioned to the PRESENT state.
+                D3D11_RESOURCE_FLAGS d3d11Flags = { D3D11_BIND_RENDER_TARGET };
+                ThrowIfFailed( m_d3d11On12Device->CreateWrappedResource(
+                    m_renderTargets[ n ].Get(),
+                    &d3d11Flags,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    D3D12_RESOURCE_STATE_PRESENT,
+                    IID_PPV_ARGS( &m_wrappedBackBuffers[ n ] )
+                    ) );
+
+                // Create a render target for D2D to draw directly to this back buffer.
+                ComPtr<IDXGISurface> surface;
+                ThrowIfFailed( m_wrappedBackBuffers[ n ].As( &surface ) );
+                ThrowIfFailed( m_d2dDeviceContext->CreateBitmapFromDxgiSurface(
+                    surface.Get(),
+                    &bitmapProperties,
+                    &m_d2dRenderTargets[ n ]
+                    ) );
+
+                // Create graphics and compute command allocators for the current frame.
+                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &m_commandAllocators[ n ] ) ) );
+                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS( &m_computeCommandAllocators[ n ] ) ) );
+            }
+        }
+
+        // Define the debug gfx root signature.
+        {
+            constexpr UINT matSize( sizeof( Mat4 ) / sizeof( UINT ) );
+            m_gfxRootSignature.reset( DebugGfxRootParametersCount, 0 );
+
+            // BasicTrans VS constant buffer.
+            m_gfxRootSignature[ DebugGfxVSBasicTrans ].InitAsConstants(
+                matSize,                            // 1 float4x4
+                0,                                  // b0
+                0,                                  // space0
+                D3D12_SHADER_VISIBILITY_VERTEX );   // vertex shader visible
+
+            // BasicOutput PS constant buffer.
+            m_gfxRootSignature[ DebugGfxPSBasicOutput ].InitAsConstants(
+                4,                                  // float4
+                0,                                  // b0
+                1,                                  // space1
+                D3D12_SHADER_VISIBILITY_PIXEL );    // pixel shader visible
+
+            // Finalize the gfx root signature.
+            m_gfxRootSignature.finalize( m_d3d12Device.Get() );
+        }
+
+        // Define the debug gfx PSO.
+        {
+            // Describe and create the graphics pipeline state objects (PSO).
+            const auto inputElementDescs = Model::inputElementDesc();
+            const std::array<DXGI_FORMAT, 1> RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM };
+            CD3DX12_GRAPHICS_PIPELINE_STATE_DESC psoDesc(
+                m_gfxRootSignature.get(),
+                { g_prsmgptBasicVS, _countof( g_prsmgptBasicVS ) },
+                { g_prsmgptBasicPS, _countof( g_prsmgptBasicPS ) },
+                { inputElementDescs.data(), static_cast<UINT>( inputElementDescs.size() ) },
+                DXGI_FORMAT_D32_FLOAT,
+                1,
+                RTVFormats.data()
+                );
+            psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;   // Set the rasterizer state fill mode to wireframe.
+            //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // TODO: Remove when done testing.
+            ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_debugAccel3DPSO ) ) );
+        }
+
+        // Create the depth stencil view.
+        {
+            D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
+            depthStencilDesc.Format = DXGI_FORMAT_D32_FLOAT;
+            depthStencilDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+            depthStencilDesc.Flags = D3D12_DSV_FLAG_NONE;
+
+            D3D12_CLEAR_VALUE depthOptimizedClearValue = {};
+            depthOptimizedClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+            depthOptimizedClearValue.DepthStencil.Depth = 1.0f;
+            depthOptimizedClearValue.DepthStencil.Stencil = 0;
+
+            ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
+                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
+                D3D12_HEAP_FLAG_NONE,
+                &CD3DX12_RESOURCE_DESC::Tex2D(
+                    DXGI_FORMAT_D32_FLOAT,                      // Texture format.
+                    m_width,                                    // Texture width.
+                    m_height,                                   // Texture height.
+                    1,                                          // Array size (default).
+                    0,                                          // Mip levels (default).
+                    1,                                          // Sample count (default).
+                    0,                                          // Sample quality (default).
+                    D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL ),  // Resource flags.
+                D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                &depthOptimizedClearValue,
+                IID_PPV_ARGS( &m_depthStencil )
+                ) );
+
+            m_pDsvHeap->addDSV( m_depthStencil.Get(), &depthStencilDesc, "dsv" );
+        }
+
+        // Create the debug camera.
+        {
+            // TODO: Need to read camera params from the scene file.
+            //const float fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );
+            const float
+                fWidth( static_cast<float>( m_width ) ),
+                fHeight( static_cast<float>( m_height ) ),
+                fov( .25f * XM_PI /*90*/ ),
+                aspectRatio( fWidth / fHeight ),
+                nearPlane( /*1e-2f*/ 1.f ),
+                farPlane( 1000.f ),
+                motionFactor( .05f ),
+                rotationFactor( .05f ),
+                screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
+                screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
+                screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
+                screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
+            const Vec3 eye( 0, 0, -10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+            m_pDebugPerspectiveCamera.reset(
+                new DebugPerspectiveCamera(
+                    eye,
+                    lookAt,
+                    up,
+                    fov,
+                    aspectRatio,
+                    nearPlane,
+                    farPlane,
+                    motionFactor,
+                    rotationFactor ) );            
+        }
+
+        // Create the graphics and compute command lists.
+        ThrowIfFailed(
+            m_d3d12Device->CreateCommandList(
+                0,                                          // GPU node (only 1 GPU for now)
+                D3D12_COMMAND_LIST_TYPE_DIRECT,             // Command list type
+                m_commandAllocators[ m_frameIndex ].Get(),  // Command allocator
+                m_debugAccel3DPSO.Get(),                      // Pipeline state
+                IID_PPV_ARGS( &m_commandList ) ) );         // Command list (output)
+
+        // Load the test model.
+        {
+            const path modelPath( "N:\\rsmgpt\\models\\test1.obj" );
+            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );
+        }
+
+        // Close the command list and execute it to begin the vertex buffer copy into the default heap.
+        ThrowIfFailed( m_commandList->Close() );
+        std::array<ID3D12CommandList*, 1> ppCommandLists = { m_commandList.Get() };
+        m_commandQueue->ExecuteCommandLists( static_cast<UINT>( ppCommandLists.size() ), ppCommandLists.data() );
+
+        // Create synchronization objects and wait until assets have been uploaded to the GPU.
+        {
+            ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_fence ) ) );
+            ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_computeFence ) ) );
+            m_fenceValues[ m_frameIndex ]++;
+
+            // Create an event handle to use for frame synchronization.
+            m_fenceEvent = CreateEventEx( nullptr, FALSE, FALSE, EVENT_ALL_ACCESS );
+            if( m_fenceEvent == nullptr )
+            {
+                ThrowIfFailed( HRESULT_FROM_WIN32( GetLastError() ) );
+            }
+
+            // Wait for the command list to execute; we are reusing the same command 
+            // list in our main loop but for now, we just want to wait for setup to 
+            // complete before continuing.
+            waitForGpu();
+        }
     }
 
     // Render method for path tracing mode.
@@ -926,19 +1258,19 @@ namespace rsmgpt
             cbvSrvUavHeaps.data() );
 
         // Update m_cbPerFrame.
-        const auto camPos = m_pCamera->eyePosW();   // Storing that it can be used later when rendering it as text.
-        m_cbPerFrame.gRasterToWorld = m_pCamera->rasterToWorld().Transpose();
+        const auto camPos = m_pPTPersepectiveCamera->eyePosW();   // Storing that it can be used later when rendering it as text.
+        m_cbPerFrame.gRasterToWorld = m_pPTPersepectiveCamera->rasterToWorld().Transpose();
         m_cbPerFrame.gCamPos = camPos;
         m_cbPerFrame.gNumFaces = static_cast<unsigned>( m_pModel->numFaces() );
-        memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( ConstantBufferData ) );   // This will be updated at runtime.
+        memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( PTCbPerFrame ) );   // This will be updated at runtime.
 
                                                                                   // Set the compute pipeline bindings.
-        m_computeCommandList->SetComputeRootConstantBufferView( CbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
+        m_computeCommandList->SetComputeRootConstantBufferView( PTCbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
         m_computeCommandList->SetComputeRootDescriptorTable(
-            ComputeSrvTable,
+            PTComputeSrvTable,
             m_pCsuHeap->getGPUHandle( "gVertexBuffer" ) );  // Set the SRV table.
         m_computeCommandList->SetComputeRootDescriptorTable(
-            ComputeUavTable,
+            PTComputeUavTable,
             m_pCsuHeap->getGPUHandle( "gOutput" ) );    // Set the UAV table.
 
                                                         // Dispatch enough thread groups to cover the entire screen.
@@ -1007,7 +1339,7 @@ namespace rsmgpt
 
             // Bind the path tracer output SRV to the graphics pipeline.
             m_commandList->SetGraphicsRootDescriptorTable(
-                GfxSrvTable,
+                PTGfxSrvTable,
                 m_pCsuHeap->getGPUHandle( "gptOutput" ) ); // Set the UAV table.
 
                                                            // Add a barrier indicating that the path tracer output is going to be used as an SRV.
@@ -1029,9 +1361,9 @@ namespace rsmgpt
             // NOTE: Shouldn't do this since we're rendering text on top of this render target.
 #if 0
             //// Indicate that the back buffer will now be used to present.
-            //rtBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            //rtBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-            //m_commandList->ResourceBarrier( 1, &rtBarrier );  
+            //presentToRenderTargetBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            //presentToRenderTargetBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+            //m_commandList->ResourceBarrier( 1, &presentToRenderTargetBarrier );  
 #endif // 0
 
 
@@ -1072,7 +1404,7 @@ namespace rsmgpt
             m_d2dDeviceContext->SetTransform( D2D1::Matrix3x2F::Identity() );
             m_d2dDeviceContext->DrawTextW(
                 text.c_str(),
-                text.length(),
+                static_cast<UINT32>( text.length() ),
                 //_countof( text ) - 1,
                 m_textFormat.Get(),
                 &textRect,
@@ -1098,7 +1430,83 @@ namespace rsmgpt
     // Render method for acceleration structure mode.
     void Engine::renderDebugAccelMode()
     {
-        // TODO: Add implementation here.
+        // Command list allocators can only be reset when the associated 
+        // command lists have finished execution on the GPU; apps should use 
+        // fences to determine GPU execution progress.
+        ThrowIfFailed( m_commandAllocators[ m_frameIndex ]->Reset() );
+
+        // However, when ExecuteCommandList() is called on a particular command 
+        // list, that command list can then be reset at any time and must be before 
+        // re-recording.
+        ThrowIfFailed( m_commandList->Reset( m_commandAllocators[ m_frameIndex ].Get(), m_debugAccel3DPSO.Get() ) );
+
+        // Set the debug gfx root signature.
+        m_commandList->SetGraphicsRootSignature( m_gfxRootSignature.get() );
+
+        // Set the debug gfx pipeline state.
+        m_commandList->SetPipelineState( m_debugAccel3DPSO.Get() );
+
+        // Set the viewport and scissor rect.
+        // NOTE: The scissor rect is important as D3D12 defaults to an empty scissor rect which means that nothing
+        //       will be rendered if it is not set.
+        m_commandList->RSSetViewports( 1, &m_viewport );
+        m_commandList->RSSetScissorRects( 1, &m_scissorRect );
+
+        // Add a resource barrier indicating that the current back buffer will be used as a render target.
+        D3D12_RESOURCE_BARRIER presentToRenderTargetBarrier =
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_renderTargets[ m_frameIndex ].Get(),
+                D3D12_RESOURCE_STATE_PRESENT,
+                D3D12_RESOURCE_STATE_RENDER_TARGET );
+        m_commandList->ResourceBarrier( 1, &presentToRenderTargetBarrier );
+
+        // Get handles to the current back buffer's RTV and the DSV and bind them to the graphics pipeline.
+        const auto rtvHandle( m_pRtvHeap->getCPUHandle( "rtv" + std::to_string( m_frameIndex ) ) );
+        const auto dsvHandle( m_pDsvHeap->getCPUHandle( "dsv" ) );
+        m_commandList->OMSetRenderTargets( 1, &rtvHandle, FALSE, &dsvHandle );
+
+        // Clear the render target and depth-stencil views.
+        const float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        m_commandList->ClearRenderTargetView( rtvHandle, clearColor, 0, nullptr );
+        m_commandList->ClearDepthStencilView( dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr );
+
+        // Set the debug PS constants.
+        const Color debugColour = Color( 1.f, 0.f, 0.f, 1.f );  // Use a debug colour of red.
+        m_commandList->SetGraphicsRoot32BitConstants(
+            DebugGfxPSBasicOutput,
+            sizeof( Color ) / sizeof( float ),
+            &debugColour,
+            0 );
+
+        // Draw the model.
+        const Mat4 viewProj = m_pDebugPerspectiveCamera->view() * m_pDebugPerspectiveCamera->proj();
+        m_pModel->draw(
+            viewProj,
+            DebugGfxVSBasicTrans,
+            0,
+            m_commandList.Get() );
+
+        // Add a resource barrier indicating that the current back buffer will be used to present.
+        D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier =
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_renderTargets[ m_frameIndex ].Get(),
+                D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_RESOURCE_STATE_PRESENT );
+        m_commandList->ResourceBarrier( 1, &renderTargetToPresentBarrier );
+
+        // Close the command list and execute it.
+        ThrowIfFailed( m_commandList->Close() );
+
+        ID3D12CommandList* const ppCommandLists[] = { m_commandList.Get() };
+        m_commandQueue->ExecuteCommandLists( 1, ppCommandLists );
+
+        // TODO: Will have to remove this when we add the 11on12 text rendering.
+
+        // Present the frame.
+        m_swapChain->Present( 1, 0 );
+
+        // Move to the next frame.
+        moveToNextFrame();
     }
 
 }	// end of namespace rsmgpt
