@@ -25,40 +25,33 @@
 
 namespace rsmgpt
 {
-    PerspectiveCamera::PerspectiveCamera(
+    Camera::Camera(
         const Vec3 eye,
         const Vec3 lookAt,
         const Vec3 up,
-        const float focalLength,
-        const float lensRadius,
-        const float rasterWidth,
-        const float rasterHeight,
         const float fov,
         const float m_aspectRatio,
         const float nearDist,
         const float farDist,
         const float motionFactor,
         const float rotationFactor ) :
-        m_eye(eye),
-        m_lookAt(lookAt),
-        m_up(up),
-        m_focalDist(focalLength),
-        m_lensRadius(lensRadius),
-        m_rasterWidth(rasterWidth),
-        m_rasterHeight(rasterHeight),
-        m_fov(fov),
-        m_aspectRatio(m_aspectRatio),
-        m_nearDist(nearDist),
-        m_farDist(farDist),
-        m_motionFactor(motionFactor),
-        m_rotationFactor(rotationFactor)
+        m_eye( eye ),
+        m_lookAt( lookAt ),
+        m_up( up ),
+        m_fov( fov ),
+        m_aspectRatio( m_aspectRatio ),
+        m_nearDist( nearDist ),
+        m_farDist( farDist ),
+        m_motionFactor( motionFactor ),
+        m_rotationFactor( rotationFactor )
     {
         // display a warning that the eye position and look at point cannot be the same and so,
         // the eye position is being pushed -100 units backward to accommodate this case
         if( m_eye == m_lookAt )
         {
-            ::MessageBoxA( NULL, "Eye position cannot be the same as the look at point. Pushing the camera 100 units backwards",
-                "Camera initialization", MB_ICONWARNING | MB_OK );
+            /*::MessageBoxA( NULL, "Eye position cannot be the same as the look at point. Pushing the camera 100 units backwards",
+                "Camera initialization", MB_ICONWARNING | MB_OK );*/
+            ::OutputDebugStringA( "Eye position cannot be the same as the look at point. Pushing the camera 100 units backwards" );
             m_eye.z -= 100.0f;
         }
 
@@ -86,27 +79,24 @@ namespace rsmgpt
             m_u.Normalize();
             m_v = m_n.Cross( m_u );
         }
-
-        updateView();	// update the view matrix
-        updateProj();	// update the projection matrix
     }
 
     // roll (rotate about n) the camera by angle radians
-    void PerspectiveCamera::roll( const float angle )
+    void Camera::roll( const float angle )
     {
         // rotate u and v about n by angle radians
         rotateAxes( m_n, angle, m_u, m_v );
     }
 
     // pitch (rotate about u) the camera by angle radians
-    void PerspectiveCamera::pitch( const float angle )
+    void Camera::pitch( const float angle )
     {
         // rotate v and n about u by angle radians
         rotateAxes( m_u, angle, m_v, m_n );
     }
 
     // yaw (rotate about v) the camera by angle radians
-    void PerspectiveCamera::yaw( const float angle )
+    void Camera::yaw( const float angle )
     {
         // rotate u and n about v by angle
         rotateAxes( m_v, angle, m_u, m_n );
@@ -116,7 +106,7 @@ namespace rsmgpt
     }
 
     // rotate the camera about the up vector by angle radians (much easier to handle than yaw)
-    void PerspectiveCamera::rotateY( const float angle )
+    void Camera::rotateY( const float angle )
     {
         // create a trans matrix to rotate by angle about the up vector
         Mat4 trans = Mat4::CreateFromAxisAngle( m_up, angle );
@@ -132,7 +122,7 @@ namespace rsmgpt
     }
 
     // slide the camera by du, dv and dn along the u, v and n axes respectively
-    void PerspectiveCamera::slide( const float du, const float dv, const float dn )
+    void Camera::slide( const float du, const float dv, const float dn )
     {
         // CORRECT APPROACH
         // This causes the camera to slide along its u, v and n axes
@@ -154,15 +144,136 @@ namespace rsmgpt
     }
 
     // mutator func to set the aspect ratio (used when the window is resized)
-    void PerspectiveCamera::setAspectRatio( const float aspectRatio )
+    void Camera::setAspectRatio( const float aspectRatio )
     {
         // update the aspect ratio and the proj matrix
         m_aspectRatio = aspectRatio;
         updateProj();
     }
 
+    // helper function to rotate 2 axes around a given axes by a given angle
+    void Camera::rotateAxes( const Vec3 rotAxis, const float angle, Vec3 &axis1, Vec3 &axis2 )
+    {
+        // create a trans matrix to rotate by angle about rotAxis
+        Mat4 trans = Mat4::CreateFromAxisAngle( rotAxis, angle );
+
+        // rotate axis1 and axis2 using trans
+        axis1 = Vec3::Transform( axis1, trans );
+        axis2 = Vec3::Transform( axis2, trans );
+
+        // update the view matrix
+        updateView();
+    }
+
+    // Default implementation of updateView
+    void Camera::updateView()
+    {
+        // build the view matrix by hand
+        // the camera matrix is defined (in the DirectX documentation) as:
+        // note how this is the transpose of the OpenGL camera matrix
+        // |ux	vx	nx	0|	dx = -eye.u
+        // |uy	vy	ny	0|	dy = -eye.v
+        // |uz	vz	nz	0|	dz = -eye.n
+        // |dx	dy	dz	1|	
+        m_view = Mat4(
+            m_u.x, m_v.x, m_n.x, 0,
+            m_u.y, m_v.y, m_n.y, 0,
+            m_u.z, m_v.z, m_n.z, 0,
+            -m_eye.Dot( m_u ), -m_eye.Dot( m_v ), -m_eye.Dot( m_n ), 1
+            ); 
+
+        //m_view = Mat4::CreateLookAt( m_eye, m_lookAt, m_up );
+    }
+
+    // Default implementation of updateView
+    void Camera::updateProj()
+    {
+        //m_proj = Mat4::CreatePerspectiveFieldOfView( m_fov, m_aspectRatio, m_nearDist, m_farDist );
+        // define the left, right, bottom and top corners of the projection window
+        const float top = m_nearDist * tanf( m_fov / 2.f );
+        const float bottom = -top;
+        const float left = bottom * m_aspectRatio;
+        const float right = -left;
+
+        // the perspective projection matrix is defined as follows
+        // transposed from original OpenGL version with some additional modifications for use in Direct3D
+        // emulates D3DXMatrixPerspectiveOffCenterLH
+        // also note that pseudo-depth is computed differently than it is in OpenGL
+        // |		2N/(right-left)						0					0			0 |	N = m_nearDist
+        // |				0					2N/(top-bottom)				0			0 | F = m_farDist
+        // |	(left+right)/(left-right)	(top+bottom)/(bottom-top)	(F)/(F-N)		1 |
+        // |				0							0				FN/(N-F)		0 |
+        m_proj = Mat4(
+            2 * m_nearDist / ( right - left ),      0,                                      0,                                                  0,
+            0,                                      2 * m_nearDist / ( top - bottom ),      0,                                                  0,
+            ( left + right ) / ( left - right ),    ( top + bottom ) / ( bottom - top ),    ( m_farDist ) / ( m_farDist - m_nearDist ),         1,
+            0,                                      0,                                      m_farDist*m_nearDist / ( m_nearDist - m_farDist ),  0
+            );
+    }
+
+    // mutator func to zoom out (increase the fov)
+    void Camera::zoomOut()
+    {
+        // max possible fov (hardcoding to 45 degress (XM_PI/4 radians) for now, shouldn't really have to change though)
+        static const float maxFov( XM_PI / 4 );
+        static const float inc( XM_PI / 1800 );
+
+        // increase the field-of-view of the camera to simulate a zoom out effect but ensure that its doesn't cross maxFov
+        m_fov = ( m_fov + inc > maxFov ) ? maxFov : m_fov + inc;
+
+        // update the projection matrix
+        updateProj();
+    }
+
+    // mutator func to zoom in (decrease the fov)
+    void Camera::zoomIn()
+    {
+        // min possible fov (hardcoding to 10 degrees for now)
+        static const float minFov( 10 * XM_PI / 180.0f );
+        static const float dec( -XM_PI / 1800 );
+
+        // decrease the field-of-view of the camera to simulate a zoom in effect but ensure it doesn't cross minFov
+        m_fov = ( m_fov + dec < minFov ) ? minFov : m_fov + dec;
+
+        // update the projection matrix
+        updateProj();
+    }
+
+    PTPerspectiveCamera::PTPerspectiveCamera(
+        const Vec3 eye,
+        const Vec3 lookAt,
+        const Vec3 up,
+        const float focalLength,
+        const float lensRadius,
+        const float rasterWidth,
+        const float rasterHeight,
+        const float fov,
+        const float m_aspectRatio,
+        const float nearDist,
+        const float farDist,
+        const float motionFactor,
+        const float rotationFactor ) :
+        Camera(
+            eye,
+            lookAt,
+            up,
+            fov,
+            m_aspectRatio,
+            nearDist,
+            farDist,
+            motionFactor,
+            rotationFactor ),
+        m_focalDist( focalLength ),
+        m_lensRadius( lensRadius ),
+        m_rasterWidth( rasterWidth ),
+        m_rasterHeight( rasterHeight )
+    {
+        updateView();	// update the view matrix
+        updateProj();	// update the projection matrix
+    }
+
     // updates the view matrix using eye, lookAt and up
-    void PerspectiveCamera::updateView()
+    void PTPerspectiveCamera::updateView()
     {
         // build the view matrix by hand
         // the camera matrix is defined (in the DirectX documentation) as:
@@ -171,19 +282,19 @@ namespace rsmgpt
         // |uy	vy	ny	0|	dy = -eye.v
         // |uz	vz	nz	0|	dz = -eye.n
         // |dx	dy	dz	1|	
-        //Vec3 d(-D3DXVec3Dot(&m_eye, &m_u), -D3DXVec3Dot(&m_eye, &m_v), -D3DXVec3Dot(&m_eye, &m_n));	// @TODO: remove when done testing
-        Vec3 d( -m_eye.Dot( m_u ), -m_eye.Dot( m_v ), -m_eye.Dot( m_n ) );
-        m_view( 0, 0 ) = m_u.x;	m_view( 0, 1 ) = m_v.x;	m_view( 0, 2 ) = m_n.x;	m_view( 0, 3 ) = 0;
-        m_view( 1, 0 ) = m_u.y;	m_view( 1, 1 ) = m_v.y;	m_view( 1, 2 ) = m_n.y;	m_view( 1, 3 ) = 0;
-        m_view( 2, 0 ) = m_u.z;	m_view( 2, 1 ) = m_v.z;	m_view( 2, 2 ) = m_n.z;	m_view( 2, 3 ) = 0;
-        m_view( 3, 0 ) = d.x;		m_view( 3, 1 ) = d.y;		m_view( 3, 2 ) = d.z;		m_view( 3, 3 ) = 1;
+        m_view = Mat4(
+            m_u.x,              m_v.x,              m_n.x,              0,
+            m_u.y,              m_v.y,              m_n.y,              0,
+            m_u.z,              m_v.z,              m_n.z,              0,
+            -m_eye.Dot( m_u ),  -m_eye.Dot( m_v ),  -m_eye.Dot( m_n ),  1
+            );
 
-        // Implicitly update the projection matrix since it is based off of the view matrix.
+        // Implicitly update the projection matrix since rasterToWorld is based off of both the view as well as the projection matrices.
         updateProj();
     }
 
     // updates the projection matrix using fov, m_aspectRatio, nearDist and farDist
-    void PerspectiveCamera::updateProj()
+    void PTPerspectiveCamera::updateProj()
     {
         const float
             screenxmin( m_aspectRatio > 1.f ? -m_aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
@@ -229,49 +340,41 @@ namespace rsmgpt
         m_proj( 3, 0 ) = 0;							m_proj( 3, 1 ) = 0;							m_proj( 3, 2 ) = m_farDist*m_nearDist / ( m_nearDist - m_farDist );		m_proj( 3, 3 ) = 0;
 #endif // 0
 
-
     }
 
-    // helper function to rotate 2 axes around a given axes by a given angle
-    void PerspectiveCamera::rotateAxes( const Vec3 rotAxis, const float angle, Vec3 &axis1, Vec3 &axis2 )
+    DebugPerspectiveCamera::DebugPerspectiveCamera(
+        const Vec3 eye,
+        const Vec3 lookAt,
+        const Vec3 up,
+        const float fov,
+        const float m_aspectRatio,
+        const float nearDist,
+        const float farDist,
+        const float motionFactor,
+        const float rotationFactor ) :
+        Camera(
+            eye,
+            lookAt,
+            up,
+            fov,
+            m_aspectRatio,
+            nearDist,
+            farDist,
+            motionFactor,
+            rotationFactor )
     {
-        // create a trans matrix to rotate by angle about rotAxis
-        Mat4 trans = Mat4::CreateFromAxisAngle( rotAxis, angle );
-
-        // rotate axis1 and axis2 using trans
-        axis1 = Vec3::Transform( axis1, trans );
-        axis2 = Vec3::Transform( axis2, trans );
-
-        // update the view matrix
-        updateView();
+        Camera::updateView();
+        Camera::updateProj();
     }
 
-
-    // mutator func to zoom out (increase the fov)
-    void PerspectiveCamera::zoomOut()
+    void DebugPerspectiveCamera::updateView()
     {
-        // max possible fov (hardcoding to 45 degress (XM_PI/4 radians) for now, shouldn't really have to change though)
-        static const float maxFov( XM_PI / 4 );
-        static const float inc( XM_PI / 1800 );
-
-        // increase the field-of-view of the camera to simulate a zoom out effect but ensure that its doesn't cross maxFov
-        m_fov = ( m_fov + inc > maxFov ) ? maxFov : m_fov + inc;
-
-        // update the projection matrix
-        updateProj();
+        Camera::updateView();
     }
 
-    // mutator func to zoom in (decrease the fov)
-    void PerspectiveCamera::zoomIn()
+    void DebugPerspectiveCamera::updateProj()
     {
-        // min possible fov (hardcoding to 10 degrees for now)
-        static const float minFov( 10 * XM_PI / 180.0f );
-        static const float dec( -XM_PI / 1800 );
-
-        // decrease the field-of-view of the camera to simulate a zoom in effect but ensure it doesn't cross minFov
-        m_fov = ( m_fov + dec < minFov ) ? minFov : m_fov + dec;
-
-        // update the projection matrix
-        updateProj();
+        Camera::updateProj();
     }
+    
 }   // end of namespace rsmgpt

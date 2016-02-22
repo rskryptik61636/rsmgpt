@@ -29,27 +29,20 @@
 namespace rsmgpt
 {
 
-    class PerspectiveCamera
+    class Camera
     {
     public:
-        
-        PerspectiveCamera( 
-            const Vec3 eye, 
-            const Vec3 lookAt, 
-            const Vec3 up,
-            const float focalLength,
-            const float lensRadius,
-            const float rasterWidth,
-            const float rasterHeight,
-            const float fov,
-            const float aspectRatio, 
-            const float nearDist, 
-            const float farDist,
-            const float motionFactor, 
-            const float rotationFactor );
 
-        // Raster to world transformation matrix accessor method.
-        inline Mat4 rasterToWorld() const { return m_rasterToWorld; }
+        Camera(
+            const Vec3 eye,
+            const Vec3 lookAt,
+            const Vec3 up,
+            const float fov,
+            const float aspectRatio,
+            const float nearDist,
+            const float farDist,
+            const float motionFactor,
+            const float rotationFactor );
 
         // accessor func for the motion factor
         inline const float motionFactor()	const { return m_motionFactor; }
@@ -86,23 +79,19 @@ namespace rsmgpt
 
     protected:
 
-        // Updates the view matrix using eye, lookAt and up
-        void updateView();
+        // NOTE: Default implementations of update(View/Proj) will be available for use by the child classes.
 
-        // Updates the projection matrix using fov, aspectRatio, nearDist and farDist
-        void updateProj();
+        // Updates the view matrix using eye, lookAt and up. Needs to be implemented by each child class.
+        virtual void updateView() = 0;
+
+        // Updates the projection matrix using fov, aspectRatio, nearDist and farDist. Needs to be implemented by each child class.
+        virtual void updateProj() = 0;
 
         // Helper function to rotate 2 axes around a given axes by a given angle
         void rotateAxes( const Vec3 rotAxis, const float angle, Vec3 &axis1, Vec3 &axis2 );
 
         // View matrix params
         Vec3 m_eye, m_lookAt, m_up;
-
-        // Camera lens params.
-        float m_focalDist, m_lensRadius;
-
-        // Raster params.
-        float m_rasterWidth, m_rasterHeight;
 
         // Projection matrix params
         float m_fov, m_aspectRatio, m_nearDist, m_farDist;
@@ -116,6 +105,72 @@ namespace rsmgpt
         // Motion and rotation factors
         float m_motionFactor, m_rotationFactor;
     };
-    typedef std::unique_ptr<PerspectiveCamera> PerspectiveCameraPtr;
+
+    class PTPerspectiveCamera : public Camera
+    {
+    public:
+        
+        PTPerspectiveCamera( 
+            const Vec3 eye, 
+            const Vec3 lookAt, 
+            const Vec3 up,
+            const float focalLength,
+            const float lensRadius,
+            const float rasterWidth,
+            const float rasterHeight,
+            const float fov,
+            const float aspectRatio, 
+            const float nearDist, 
+            const float farDist,
+            const float motionFactor, 
+            const float rotationFactor );
+
+        // Raster to world transformation matrix accessor method.
+        inline Mat4 rasterToWorld() const { return m_rasterToWorld; }        
+
+    protected:
+
+        // Updates the view matrix using eye, lookAt and up.
+        void updateView() override;
+
+        // Updates the projection matrix using fov, aspectRatio, nearDist and farDist
+        void updateProj() override;
+
+        // Camera lens params.
+        float m_focalDist, m_lensRadius;
+
+        // Raster params.
+        float m_rasterWidth, m_rasterHeight;
+    };
+    typedef std::unique_ptr<PTPerspectiveCamera> PTPerspectiveCameraPtr;
+
+    class DebugPerspectiveCamera : public Camera
+    {
+    public:
+
+        DebugPerspectiveCamera(
+            const Vec3 eye,
+            const Vec3 lookAt,
+            const Vec3 up,
+            const float fov,
+            const float aspectRatio,
+            const float nearDist,
+            const float farDist,
+            const float motionFactor,
+            const float rotationFactor );
+
+        // Accessor methods to return the view and projection matrices.
+        inline Mat4 view() const { return m_view; }
+        inline Mat4 proj() const { return m_proj; }
+
+    protected:
+
+        // Updates the view matrix using eye, lookAt and up.
+        void updateView() override;
+
+        // Updates the projection matrix using fov, aspectRatio, nearDist and farDist
+        void updateProj() override;
+    };
+    typedef std::unique_ptr<DebugPerspectiveCamera> DebugPerspectiveCameraPtr;
 
 }   // end of namespace rsmgpt
