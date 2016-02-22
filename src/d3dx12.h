@@ -243,6 +243,96 @@ struct CD3DX12_RASTERIZER_DESC : public D3D12_RASTERIZER_DESC
     operator const D3D12_RASTERIZER_DESC&() const { return *this; }
 };
 
+// Added by Madayi Kolangarakath Rohit Shrinath (2016-02-20)
+//------------------------------------------------------------------------------------------------
+struct CD3DX12_GRAPHICS_PIPELINE_STATE_DESC : public D3D12_GRAPHICS_PIPELINE_STATE_DESC
+{
+    CD3DX12_GRAPHICS_PIPELINE_STATE_DESC()
+    {
+    }
+    explicit CD3DX12_GRAPHICS_PIPELINE_STATE_DESC( const D3D12_GRAPHICS_PIPELINE_STATE_DESC& o ) :
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC( o )
+    {
+    }
+    explicit CD3DX12_GRAPHICS_PIPELINE_STATE_DESC( 
+        ID3D12RootSignature *pRootSignature,
+        D3D12_SHADER_BYTECODE VS,
+        D3D12_SHADER_BYTECODE PS,
+        D3D12_INPUT_LAYOUT_DESC InputLayout,
+        DXGI_FORMAT DSVFormat,
+        UINT NumRenderTargets, 
+        const DXGI_FORMAT* pRTVFormats        
+        )
+    {
+        memset( this, 0, sizeof( CD3DX12_GRAPHICS_PIPELINE_STATE_DESC ) );
+        this->pRootSignature = pRootSignature;
+        this->VS = VS;
+        this->PS = PS;
+        this->InputLayout = InputLayout;
+        this->DSVFormat = DSVFormat;
+        this->NumRenderTargets = NumRenderTargets;
+        memcpy_s(
+            this->RTVFormats,
+            NumRenderTargets * sizeof( DXGI_FORMAT ),
+            pRTVFormats,
+            NumRenderTargets * sizeof( DXGI_FORMAT ) );
+        RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
+        BlendState = CD3DX12_BLEND_DESC( D3D12_DEFAULT );
+        DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC( D3D12_DEFAULT );
+        SampleMask = UINT_MAX;
+        PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        SampleDesc.Count = 1;
+    }
+    explicit CD3DX12_GRAPHICS_PIPELINE_STATE_DESC(
+        ID3D12RootSignature *pRootSignature,
+        D3D12_SHADER_BYTECODE VS,
+        D3D12_SHADER_BYTECODE PS,
+        D3D12_SHADER_BYTECODE DS,
+        D3D12_SHADER_BYTECODE HS,
+        D3D12_SHADER_BYTECODE GS,
+        D3D12_STREAM_OUTPUT_DESC StreamOutput,
+        D3D12_BLEND_DESC BlendState,
+        UINT SampleMask,
+        D3D12_RASTERIZER_DESC RasterizerState,
+        D3D12_DEPTH_STENCIL_DESC DepthStencilState,
+        D3D12_INPUT_LAYOUT_DESC InputLayout,
+        D3D12_INDEX_BUFFER_STRIP_CUT_VALUE IBStripCutValue,
+        D3D12_PRIMITIVE_TOPOLOGY_TYPE PrimitiveTopologyType,
+        UINT NumRenderTargets,
+        DXGI_FORMAT RTVFormats[ 8 ],
+        DXGI_FORMAT DSVFormat,
+        DXGI_SAMPLE_DESC SampleDesc,
+        UINT NodeMask,
+        D3D12_CACHED_PIPELINE_STATE CachedPSO,
+        D3D12_PIPELINE_STATE_FLAGS Flags )
+    {
+        this->pRootSignature = pRootSignature;
+        this->VS = VS;
+        this->PS = PS;
+        this->DS = DS;
+        this->HS = HS;
+        this->GS = GS;
+        this->StreamOutput = StreamOutput;
+        this->BlendState = BlendState;
+        this->SampleMask = SampleMask;
+        this->RasterizerState = RasterizerState;
+        this->DepthStencilState = DepthStencilState;
+        this->InputLayout = InputLayout;
+        this->IBStripCutValue = IBStripCutValue;
+        this->PrimitiveTopologyType = PrimitiveTopologyType;
+        this->NumRenderTargets = NumRenderTargets;
+        memcpy_s( this->RTVFormats, sizeof( this->RTVFormats ), RTVFormats, sizeof( RTVFormats ) );
+        //this->RTVFormats = RTVFormats;
+        this->DSVFormat = DSVFormat;
+        this->SampleDesc = SampleDesc;
+        this->NodeMask = NodeMask;
+        this->CachedPSO = CachedPSO;
+        this->Flags = Flags;
+    }
+    ~CD3DX12_GRAPHICS_PIPELINE_STATE_DESC() {}
+    operator const D3D12_GRAPHICS_PIPELINE_STATE_DESC&( ) const { return *this; }
+};
+
 //------------------------------------------------------------------------------------------------
 struct CD3DX12_RESOURCE_ALLOCATION_INFO : public D3D12_RESOURCE_ALLOCATION_INFO
 {
