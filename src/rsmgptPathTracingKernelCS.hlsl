@@ -67,6 +67,8 @@ void main(
     // Iterate over the model's triangles and shade whichever ones are hit by the current ray.
     bool hit = false;
     float t, b1, b2;
+
+    [loop]
     for( uint i = 0; i < gNumFaces; ++i )
     {
         Triangle tri = {
