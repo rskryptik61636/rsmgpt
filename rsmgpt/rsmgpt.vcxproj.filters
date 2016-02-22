@@ -51,6 +51,9 @@
     <ClInclude Include="..\src\rsmgptAccelerationStructures.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\rsmgptPipelineState.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\DXSample.cpp">
@@ -79,8 +82,11 @@
     <FxCompile Include="..\src\rsmgptPathTracingOutputVS.hlsl" />
     <FxCompile Include="..\src\rsmgptPathTracingOutputPS.hlsl" />
     <FxCompile Include="..\src\rsmgptPathTracingKernelCS.hlsl" />
+    <FxCompile Include="..\src\rsmgptBasicVS.hlsl" />
+    <FxCompile Include="..\src\rsmgptBasicPS.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\src\rsmgptPathTracingCommon.hlsli" />
+    <None Include="..\src\rsmgptBasicCommon.hlsli" />
   </ItemGroup>
 </Project>
