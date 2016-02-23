@@ -159,9 +159,8 @@ namespace rsmgpt
             const float motionFactor,
             const float rotationFactor );
 
-        // Accessor methods to return the view and projection matrices.
-        inline Mat4 view() const { return m_view; }
-        inline Mat4 proj() const { return m_proj; }
+        // Accessor method to return the composite view-projection matrix.
+        inline Mat4 viewProj() const { return m_viewProj; }
 
     protected:
 
@@ -170,6 +169,9 @@ namespace rsmgpt
 
         // Updates the projection matrix using fov, aspectRatio, nearDist and farDist
         void updateProj() override;
+
+        // Composite view-projection matrix.
+        Mat4 m_viewProj;
     };
     typedef std::unique_ptr<DebugPerspectiveCamera> DebugPerspectiveCameraPtr;
 

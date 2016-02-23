@@ -365,16 +365,25 @@ namespace rsmgpt
     {
         Camera::updateView();
         Camera::updateProj();
+
+        // Update m_viewProj.
+        m_viewProj = m_view * m_proj;
     }
 
     void DebugPerspectiveCamera::updateView()
     {
         Camera::updateView();
+
+        // Update m_viewProj.
+        m_viewProj = m_view * m_proj;
     }
 
     void DebugPerspectiveCamera::updateProj()
     {
         Camera::updateProj();
+
+        // Update m_viewProj.
+        m_viewProj = m_view * m_proj;
     }
     
 }   // end of namespace rsmgpt
