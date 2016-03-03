@@ -723,13 +723,13 @@ namespace rsmgpt
                 aspectRatio( fWidth / fHeight ),
                 nearPlane( /*1e-2f*/ 1.f ),
                 farPlane( 1000.f ),
-                motionFactor( .05f ),
+                motionFactor( .5f ),
                 rotationFactor( .05f ),
                 screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
                 screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
-            const Vec3 eye( 0, 0, -10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+            const Vec3 eye( 0, 0, -250 /*-10*/ ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
             m_pPTPersepectiveCamera.reset(
                 new PTPerspectiveCamera(
                     eye,
@@ -799,7 +799,7 @@ namespace rsmgpt
 
         // Load the test model.
         {
-            const path modelPath( "N:\\rsmgpt\\models\\test1.obj" );
+            const path modelPath( "N:\\rsmgpt\\models\\spider.obj" );
             m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );
 
             // Create SRVs for the model's vertex and index buffers.
