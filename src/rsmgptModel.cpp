@@ -230,7 +230,8 @@ namespace rsmgpt
 
                 // Transform all the primitives in the current node and add them to the primitive list.
                 const auto& currMesh = m_meshes[ currNode.meshIndexes[ i ] ];
-                for( auto j = currMesh.indexStart; j < currMesh.indexCount; j += 3 )
+                const auto currStart = currMesh.indexStart, currEnd = currStart + currMesh.indexCount;
+                for( auto j = currStart; j < currEnd; j += 3 )
                 {
                     unsigned int
                         v1( currMesh.vertexStart + m_indexList[ j ] ),
