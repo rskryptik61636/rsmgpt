@@ -522,8 +522,8 @@ namespace rsmgpt
             m_computeRootSignature.reset( PTComputeRootParametersCount, 0 );
             m_computeRootSignature[ PTCbvCbPerFrame ].InitAsConstantBufferView( 0 );
 
-            // The second compute root parameter is a table to the model vertex and index buffer SRVs.
-            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0 );
+            // The second compute root parameter is a table to the model vertex, index buffer, primitive and BVH node array SRVs.
+            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0 );
             m_computeRootSignature[ PTComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
 
             // The third compute root parameter is a table to the render output UAVs.
@@ -817,6 +817,17 @@ namespace rsmgpt
             ibDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->numIndices() );
             ibDesc.Buffer.StructureByteStride = sizeof( unsigned int );
             m_pCsuHeap->addSRV( m_pModel->indexBuffer(), &ibDesc, "gIndexBuffer" );
+
+            // Create SRVs for the model's primitive and BVH node arrays.
+            D3D12_SHADER_RESOURCE_VIEW_DESC primDesc( ibDesc );
+            primDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nPrimitives() );
+            primDesc.Buffer.StructureByteStride = m_pModel->accel()->primitiveSize();
+            m_pCsuHeap->addSRV( m_pModel->accel()->primitivesResource(), &primDesc, "gPrimitives" );
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
+            nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
+            nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
+            m_pCsuHeap->addSRV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
         }
 
         {
@@ -1175,7 +1186,7 @@ namespace rsmgpt
                 screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
-            const Vec3 eye( 0, 0, -10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+            const Vec3 eye( 0, 0, -10 ), lookAt( 0, 0, 0 ), up( 0, 1, 0 );
             m_pDebugPerspectiveCamera.reset(
                 new DebugPerspectiveCamera(
                     eye,
@@ -1479,7 +1490,7 @@ namespace rsmgpt
             0 );
 
         // Draw the model.
-        const Mat4 viewProj = m_pDebugPerspectiveCamera->view() * m_pDebugPerspectiveCamera->proj();
+        const Mat4 viewProj = Mat4::CreateRotationY( -.5 * XM_PI ) * m_pDebugPerspectiveCamera->viewProj();
         m_pModel->draw(
             viewProj,
             DebugGfxVSBasicTrans,

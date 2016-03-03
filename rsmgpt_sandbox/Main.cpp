@@ -1,7 +1,10 @@
 #include <stdafx.h>
 #include <rsmgptDefns.h>
+#include <rsmgptCamera.h>
 #include <iostream>
 #include <numeric>
+
+#include <bvh.h>
 
 //#pragma push_macro("max")
 //#include <algorithm>
@@ -13,8 +16,30 @@
 #pragma message("Linking against DirectXTK.lib")
 #pragma comment(lib, "DirectXTK.lib")
 
+#ifdef _DEBUG
+
+#pragma message("Linking against assimp-vc130-mtd.lib")
+#pragma comment(lib, "assimp-vc130-mtd.lib")
+
+#else
+
+#pragma message("Linking against assimp-vc130-mt.lib")
+#pragma comment(lib, "assimp-vc130-mt.lib")
+
+#endif  // _DEBUG
+
+#if 0
+#pragma message("Linking against Core.lib")
+#pragma comment(lib, "Core.lib")
+
+#pragma message("Linking against ZLib.lib")
+#pragma comment(lib, "ZLib.lib")  
+#endif // 0
+
 using namespace rsmgpt;
 
+// TODO: Remove when done testing.
+#if 0
 // Ray structure.
 struct Ray
 {
@@ -22,6 +47,8 @@ struct Ray
     Vec3 d;   // Ray direction.
     float tMax; // Ray max intersection parameter.
 };
+#endif // 0
+
 
 // Sphere structure.
 struct Sphere
@@ -103,11 +130,11 @@ float MaxComponent( const Vec3 &v )
     return max( v.x, max( v.y, v.z ) );
 }
 
-#define MachineEpsilon std::numeric_limits<float>::epsilon() * 0.5f
-inline constexpr float gamma( int n )
-{
-    return ( n * MachineEpsilon ) / ( 1 - n * MachineEpsilon );
-}
+//#define MachineEpsilon std::numeric_limits<float>::epsilon() * 0.5f
+//inline constexpr float gamma( int n )
+//{
+//    return ( n * MachineEpsilon ) / ( 1 - n * MachineEpsilon );
+//}
 
 // Ray - sphere intersection test.
 void sphereIntersect( const Ray& ray, /*in float radius,*/const Sphere& sphere, bool& hit )
@@ -328,6 +355,61 @@ bool triangleIntersectV2( const Ray& ray, const Triangle& tri, float& t, float& 
 
 int main( int argc, char *argv[] )
 {
+    // Test ray-box intersection.
+    Ray ray(
+        Point3(0, 0, -20),    // Origin
+        Vec3(0, 0, 1)       // Direction
+        );
+    Bounds3f box(
+        Point3( -10, -10, -10 ),    // pMin
+        Point3( 10, 10, 10 )        // pMax
+        );
+
+    // Check if the ray hits the box.
+    const Vec3 invDir = Vec3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
+    const int dirIsNeg[ 3 ] = { ray.d.x < 0.f, ray.d.y < 0.f, ray.d.z < 0.f };
+    const std::string verdict = box.IntersectP( ray, invDir, dirIsNeg ) ? "hits " : " misses";
+    std::cout 
+        << "Ray "
+        << verdict
+        << " the box\n";
+
+#if 0
+    // Create a debug camera object.
+    const float
+        m_width( 1280 ),
+        m_height( 1024 ),
+        fWidth( static_cast<float>( m_width ) ),
+        fHeight( static_cast<float>( m_height ) ),
+        fov( .25f * XM_PI /*90*/ ),
+        aspectRatio( fWidth / fHeight ),
+        nearPlane( /*1e-2f*/ 1.f ),
+        farPlane( 1000.f ),
+        motionFactor( .05f ),
+        rotationFactor( .05f ),
+        screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
+        screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
+        screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
+        screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
+    const Vec3 eye( 0, 0, 10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+    DebugPerspectiveCameraPtr pDebugCamera(
+        new DebugPerspectiveCamera(
+            eye,
+            lookAt,
+            up,
+            fov,
+            aspectRatio,
+            nearPlane,
+            farPlane,
+            motionFactor,
+            rotationFactor ) );
+
+    // Transform a single point.
+    const Mat4 camTrans = pDebugCamera->viewProj();
+    Vec4 pt( 1, 1, 1, 1 );
+    Vec4 trans = Vec4::Transform( pt, camTrans );
+    trans /= trans.w;
+
     //// Ray triangle coord system test.
     //const Vec3 p0( 0, 0, 0 ), p1( 2, 5, 0 ), p2( 5, 2, 0 );
     //const float b1( 0.25 ), b2( 0.75 );
@@ -352,7 +434,6 @@ int main( int argc, char *argv[] )
     //hit = triangleIntersectV2( ray, tri2, t, b0, b1, b2 );
     std::cout << "tri2 is " << ( hit ? "hit" : "not hit" ) << std::endl;
 
-#if 0
     // Test ray sphere intersection.
 // TODO: Testing out camera transforms. Remove when done testing.
     const float m_width( 1280 ), m_height( 1024 ), fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );

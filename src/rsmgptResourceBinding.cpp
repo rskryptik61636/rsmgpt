@@ -173,9 +173,9 @@ namespace rsmgpt
         // Create the root signature description.
         CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
         rootSignatureDesc.Init( 
-            m_rootParams.size(), 
+            static_cast<UINT>( m_rootParams.size() ), 
             m_rootParams.data(), 
-            m_staticSamplers.size(), 
+            static_cast<UINT>( m_staticSamplers.size() ),
             m_staticSamplers.data(), 
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT );
 

@@ -34,6 +34,10 @@ cbuffer cbPerFrame : register( b0 )
 StructuredBuffer<ModelVertex> gVertexBuffer : register( t0 );
 StructuredBuffer<uint> gIndexBuffer : register( t1 );
 
+// Primitives and BVH node array.
+StructuredBuffer<Primitive> gPrimitives : register( t2 );
+StructuredBuffer<LinearBVHNode> gBVHNodes : register( t3 );
+
 // Path tracing output texture.
 RWTexture2D<float4> gOutput	: register( u0 );
 
@@ -46,6 +50,60 @@ static const float tMax = 10000000;
 //// Triangle vertices.
 //static const float3 v0 = float3( 6, 0, 3 ), v1 = float3( 10, 0, 3 ), v2 = float3( 8, 2, 3 );
 static const bool cullBackFacing = true;
+
+// NOTE: Adapted from BVHAccel's IntersectP method in bvh.cpp.
+bool primHit( in Ray ray, out float t, out float b1, out float b2, inout float4 color )
+{
+    float3 invDir = float3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
+    int3 dirIsNeg = int3( invDir.x < 0, invDir.y < 0, invDir.z < 0 );
+    int nodesToVisit[ /*64*/32 ];   // NOTE: Reducing nodesToVisit to reduce temp register requirements.
+    int toVisitOffset = 0, currentNodeIndex = 0;
+
+    while( true )
+    {
+        if( boxIntersect( ray, gBVHNodes[ currentNodeIndex ].bounds, invDir, dirIsNeg ) )
+        {
+            // Process BVH node _node_ for traversal
+            uint nPrims = nPrimitives( gBVHNodes[ currentNodeIndex ] );
+            if( nPrims > 0 )
+            {
+                for( int i = 0; i < nPrims; ++i )
+                {
+                    // Check if the i'th primitive is hit.
+                    Primitive prim = gPrimitives[ gBVHNodes[ currentNodeIndex ].primitivesOrSecondChildOffset + i ];
+                    Triangle tri = { gVertexBuffer[ prim.p0 ].position, gVertexBuffer[ prim.p1 ].position, gVertexBuffer[ prim.p2 ].position };
+                    if( triangleIntersect( ray, tri, cullBackFacing, t, b1, b2 ) )
+                    {
+                        color = gVertexBuffer[ prim.p0 ].color;
+                        return true;
+                    }
+                }
+                if( toVisitOffset == 0 ) break;
+                currentNodeIndex = nodesToVisit[ --toVisitOffset ];
+            }
+            else
+            {
+                if( dirIsNeg[ axis( gBVHNodes[ currentNodeIndex ] ) ] )
+                {
+                    /// second child first
+                    nodesToVisit[ toVisitOffset++ ] = currentNodeIndex + 1;
+                    currentNodeIndex = gBVHNodes[ currentNodeIndex ].primitivesOrSecondChildOffset;
+                }
+                else
+                {
+                    nodesToVisit[ toVisitOffset++ ] = gBVHNodes[ currentNodeIndex ].primitivesOrSecondChildOffset;
+                    currentNodeIndex = currentNodeIndex + 1;
+                }
+            }
+        }
+        else
+        {
+            if( toVisitOffset == 0 ) break;
+            currentNodeIndex = nodesToVisit[ --toVisitOffset ];
+        }
+    }
+    return false;
+}
 
 // NOTE: Hardcoding the thread groups dims for now, will be updated as necessary.
 #define TG_SIZE 16
@@ -64,11 +122,13 @@ void main(
     float3 rayDir = normalize( ( mul( rasterCoords, gRasterToWorld ).xyz - gCamPos ) );
     Ray ray = { gCamPos, rayDir, tMax };
 
-    // Iterate over the model's triangles and shade whichever ones are hit by the current ray.
-    bool hit = false;
+    // Iterate over the model's BVH tree and check if any primitives are hit by the current ray.
     float t, b1, b2;
+    float4 color = float4( 0, 0, 0, 1 );
+    bool hit = primHit( ray, t, b1, b2, color );
+    gOutput[ dispatchThreadId.xy ] = color;
 
-    [loop]
+    /*[loop]
     for( uint i = 0; i < gNumFaces; ++i )
     {
         Triangle tri = {
@@ -80,16 +140,16 @@ void main(
             hit = true;
             break;
         }
-    }
+    }*/
 
-    if( hit == true )
+    /*if( hit == true )
     {
         gOutput[ dispatchThreadId.xy ] = float4( 1.f, 0.f, 1.f, 1.f );
     }
     else
     {
         gOutput[ dispatchThreadId.xy ] = float4( 0.f, 0.f, 0.f, 1.f );
-    }
+    }*/
 }
 
 //// Create a ray, sphere and triangle out of the hardcoded params.

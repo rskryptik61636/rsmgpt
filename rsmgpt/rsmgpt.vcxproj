@@ -149,13 +149,16 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\src\bvh.h" />
     <ClInclude Include="..\src\d3dx12.h" />
     <ClInclude Include="..\src\DXSample.h" />
     <ClInclude Include="..\src\DXSampleHelper.h" />
+    <ClInclude Include="..\src\memory.h" />
     <ClInclude Include="..\src\rsmgptAccelerationStructures.h" />
     <ClInclude Include="..\src\rsmgptCamera.h" />
     <ClInclude Include="..\src\rsmgptDefns.h" />
     <ClInclude Include="..\src\rsmgptEngine.h" />
+    <ClInclude Include="..\src\rsmgptGeometry.h" />
     <ClInclude Include="..\src\rsmgptModel.h" />
     <ClInclude Include="..\src\rsmgptPipelineState.h" />
     <ClInclude Include="..\src\rsmgptResourceBinding.h" />
@@ -163,7 +166,9 @@
     <ClInclude Include="..\src\stdafx.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\src\bvh.cpp" />
     <ClCompile Include="..\src\DXSample.cpp" />
+    <ClCompile Include="..\src\memory.cpp" />
     <ClCompile Include="..\src\rsmgptCamera.cpp" />
     <ClCompile Include="..\src\rsmgptEngine.cpp" />
     <ClCompile Include="..\src\rsmgptModel.cpp" />

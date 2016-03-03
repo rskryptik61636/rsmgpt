@@ -66,7 +66,61 @@ struct ModelVertex
     float4 color;
 };
 
-//float EPSILON = 0.0001;
+// Bounds structure.
+// NOTE: Adapted from Bounds3f in bvh.h
+struct Bounds
+{
+    float3 pMin;
+    float3 pMax;
+};
+
+// Function which simulates operator[] in Bounds3f.
+float3 getBoundsPt( in Bounds bounds, in int indx )
+{
+    if( indx == 0 )
+        return bounds.pMin;
+    else
+        return bounds.pMax;
+}
+
+// NOTE: Adapted from Primitive in bvh.h
+struct Primitive
+{
+    uint p0, p1, p2;
+    float4x4 transform;
+    Bounds bbox;
+};
+
+// NOTE: Adapted from LinearBVHNode in bvh.cpp
+struct LinearBVHNode
+{
+    Bounds bounds;
+    int primitivesOrSecondChildOffset;   // primitivesOffset if leaf or secondChildOffset if interior
+    uint nPrimitivesAndAxis;    // NOTE: nPrimitives is stored in bits 0-15 and axis in bits 16-23.
+    //min16uint nPrimitives;  // 0 -> interior node
+    //min16uint axis;          // interior node: xyz   // TODO:   axis was widened to a uint16_t so that it could be represented using min16uint in HLSL. 
+    //                                                //          See if there's a way to keep axis as a uint8_t in C++ and extract it from the min16uint
+    //                                                //          which will consist of axis + pad in HLSL.
+};
+
+// Helper functions to extract nPrimitives and axis from LinearBVHNode's nPrimitivesAndAxis.
+uint nPrimitives( in LinearBVHNode node )
+{
+    return ( node.nPrimitivesAndAxis & 0x0000ffff );
+}
+
+uint axis( in LinearBVHNode node )
+{
+    return ( ( node.nPrimitivesAndAxis & 0x00ff0000 ) >> 16 );
+}
+
+//float MachineEpsilon = 1e-10 * 0.5;
+#define MachineEpsilon 1e-10 * 0.5
+
+float gamma( int n )
+{
+    return ( n * MachineEpsilon ) / ( 1 - n * MachineEpsilon );
+}
 
 // Quadratic equation solver.
 bool quadratic( in float A, in float B, in float C, out float t1, out float t2 )
@@ -232,4 +286,33 @@ bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out
     }
 
     return true;
+}
+
+// Ray - box intersection test.
+// NOTE: Adapted from Bounds3f IntersectP (see bvh.h)
+bool boxIntersect( in Ray ray, in Bounds bounds, in float3 invDir, in int3 dirIsNeg )
+{
+    // Check for ray intersection against $x$ and $y$ slabs
+    float tMin = ( getBoundsPt( bounds, dirIsNeg[ 0 ] ).x - ray.o.x ) * invDir.x;
+    float tMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 0 ] ).x - ray.o.x ) * invDir.x;
+    float tyMin = ( getBoundsPt( bounds, dirIsNeg[ 1 ] ).y - ray.o.y ) * invDir.y;
+    float tyMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 1 ] ).y - ray.o.y ) * invDir.y;
+
+    // Update _tMax_ and _tyMax_ to ensure robust bounds intersection
+    tMax *= 1 + 2 * gamma( 3 );
+    tyMax *= 1 + 2 * gamma( 3 );
+    if( tMin > tyMax || tyMin > tMax ) return false;
+    if( tyMin > tMin ) tMin = tyMin;
+    if( tyMax < tMax ) tMax = tyMax;
+
+    // Check for ray intersection against $z$ slab
+    float tzMin = ( getBoundsPt( bounds, dirIsNeg[ 2 ] ).z - ray.o.z ) * invDir.z;
+    float tzMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 2 ] ).z - ray.o.z ) * invDir.z;
+
+    // Update _tzMax_ to ensure robust bounds intersection
+    tzMax *= 1 + 2 * gamma( 3 );
+    if( tMin > tzMax || tzMin > tMax ) return false;
+    if( tzMin > tMin ) tMin = tzMin;
+    if( tzMax < tMax ) tMax = tzMax;
+    return ( tMin < ray.tMax ) && ( tMax > 0 );
 }

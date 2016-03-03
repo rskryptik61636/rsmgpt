@@ -118,7 +118,7 @@ namespace rsmgpt {
         enum PTComputeRootParameters
         {
             PTCbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
-            PTComputeSrvTable,            // Srvs for the vertex and index structured buffers.
+            PTComputeSrvTable,            // Srvs for the vertex, index, primitive and BVH structured buffers.
             PTComputeUavTable,            // Uav for the path tracing output to be rendered.    
             PTComputeRootParametersCount
         };
@@ -127,9 +127,9 @@ namespace rsmgpt {
         enum PTHeapOffsets
         {
             PTComputeCbvOffset = 0,                                       // Path tracing kernel constant buffer.
-            PTComputeSrvOffset = PTComputeCbvOffset + 1,                    // Path tracing kernel vertex and index buffer SRVs.
-            PTComputeUavOffset = PTComputeSrvOffset + 2,                    // Path tracing kernel render output UAV.
-            PTGfxSrvOffset = PTComputeUavOffset + 1,                        // Path tracing kernel render output SRV (used to finally display the rendered output).
+            PTComputeSrvOffset = PTComputeCbvOffset + 1,                  // Path tracing kernel vertex, index buffer, primitive and BVH SRVs.
+            PTComputeUavOffset = PTComputeSrvOffset + 4,                  // Path tracing kernel render output UAV.
+            PTGfxSrvOffset = PTComputeUavOffset + 1,                      // Path tracing kernel render output SRV (used to finally display the rendered output).
             PTCbvSrvUavDescriptorCountPerFrame = PTGfxSrvOffset + 1
         };
 

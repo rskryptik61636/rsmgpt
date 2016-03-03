@@ -23,6 +23,7 @@
 #pragma once
 
 #include "rsmgptDefns.h"
+#include "rsmgptGeometry.h"
 
 // assimp include files. These three are usually needed.
 #include <assimp/Importer.hpp>	//OO version Header!
@@ -31,34 +32,10 @@
 #include <assimp/DefaultLogger.hpp>
 #include <assimp/LogStream.hpp>
 
+#include "bvh.h"
+
 namespace rsmgpt
 {
-
-// Model vertex instance.
-struct ModelVertex
-{
-    Vec3 position;
-    Vec3 normal;
-    Vec2 texCoord;
-    Vec3 tangent;
-    Vec3 binormal;
-    Color color;
-};
-
-// Represents a mesh subset of a model. It contains vertex and index counts and references
-// into the model's vertex and index lists.
-struct ModelMesh
-{
-    unsigned vertexCount, vertexStart, indexCount, indexStart, materialIndex;
-};	// end of struct DXMesh
-
-// Represents a node of a model. A node consists of one or more meshes and one or more children nodes.
-struct ModelNode
-{
-    Mat4 transformation;
-    std::vector<unsigned> meshIndexes;
-    std::vector<ModelNode> childNodes;
-};
 
 class Model
 {
@@ -68,6 +45,7 @@ public:
         const path modelPath,
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
+        const Mat4& initialWorldTransform = Mat4::Identity,
         const unsigned int uiImportOptions = 
             aiProcess_MakeLeftHanded | 
             aiProcess_FlipWindingOrder |
@@ -78,18 +56,20 @@ public:
     void draw( const Mat4& viewProj, const UINT rootParameterIndex, const UINT rootParameterRegisterSpace, ID3D12GraphicsCommandList* pCmdList );
 
     // Accessor function for the model's root node. Required to traverse the node tree in order to draw the model.
-    const ModelNode& rootNode() const { return m_modelRootNode; }
+    const ModelNode& rootNode() const { return m_rootNode; }
 
     // Accessor function for the model's vertex and index buffer resources and view.
-    ID3D12Resource* vertexBuffer() const { return m_pModelVertexBuffer.Get(); }
-    const D3D12_VERTEX_BUFFER_VIEW* const vertexBufferView() const { return &m_modelVertexBufferView; }
+    ID3D12Resource* vertexBuffer() const { return m_pVertexBuffer.Get(); }
+    const D3D12_VERTEX_BUFFER_VIEW* const vertexBufferView() const { return &m_vertexBufferView; }
 
-    ID3D12Resource* indexBuffer() const { return m_pModelIndexBuffer.Get(); }
-    const D3D12_INDEX_BUFFER_VIEW* const indexBufferView() const { return &m_modelIndexBufferView; }
+    ID3D12Resource* indexBuffer() const { return m_pIndexBuffer.Get(); }
+    const D3D12_INDEX_BUFFER_VIEW* const indexBufferView() const { return &m_indexBufferView; }
+
+    const BVHAccel* accel() const { return m_pAccel.get(); }
 
     // Accessor functions for the no. of vertices, indices and triangle faces.
-    std::size_t numVertices() const { return m_modelVertices.size(); }
-    std::size_t numIndices() const { return m_modelIndices.size(); }
+    std::size_t numVertices() const { return m_vertexList.size(); }
+    std::size_t numIndices() const { return m_indexList.size(); }
     std::size_t numFaces() const { return m_numFaces; }
 
     // Returns the input element desc for model vertices.
@@ -111,40 +91,55 @@ public:
 private:
 
     // Recursive draw helper function.
-    void recursiveDrawHelper( const ModelNode& currNode, const Mat4& viewProj, const UINT rootParameterIndex, const UINT rootParameterRegisterSpace, ID3D12GraphicsCommandList* pCmdList, std::vector<Mat4>& transStack );
+    void recursiveDrawHelper( 
+        const ModelNode& currNode, 
+        const Mat4& viewProj, 
+        const UINT rootParameterIndex, 
+        const UINT rootParameterRegisterSpace, 
+        ID3D12GraphicsCommandList* pCmdList, 
+        std::vector<Mat4>& transStack );
 
     // Recursive function which constructs the model's node tree.
-    void recursiveNodeConstructor( aiNode* pCurrNode, ModelNode& currNode );
+    void recursiveNodeConstructor( aiNode* pCurrNode, ModelNode& currNode, std::vector<Mat4>& transStack );
+
+    // Helper function to transform a ModelVertex by the given transform.
+    ModelVertex transVertex( const ModelVertex& vert, const Mat4& trans );
 
     // Model path
     path m_modelPath;
 
     // Model
-    std::unique_ptr<const aiScene> m_pModel;
+    std::unique_ptr<const aiScene> m_pModelScene;
     
     // Model textures
     //std::map<std::string, ShaderResourceViewPtr> m_modelDiffuseTextures, m_modelSpecularTextures, m_modelNormalTextures;
 
     // Model vertices and indices.
-    std::vector<ModelVertex> m_modelVertices;
-    std::vector<unsigned int> m_modelIndices;
+    std::vector<ModelVertex> m_vertexList;
+    std::vector<unsigned int> m_indexList;
     unsigned int m_numFaces;
 
-    ComPtr<ID3D12Resource> m_pModelVertexBuffer;
-    ComPtr<ID3D12Resource> m_pModelVertexUpload;
-    D3D12_VERTEX_BUFFER_VIEW m_modelVertexBufferView;
+    ComPtr<ID3D12Resource> m_pVertexBuffer;
+    ComPtr<ID3D12Resource> m_pVertexUploadBuffer;
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
     
-    ComPtr<ID3D12Resource> m_pModelIndexBuffer;
-    ComPtr<ID3D12Resource> m_pModelIndexUpload;
-    D3D12_INDEX_BUFFER_VIEW m_modelIndexBufferView;
+    ComPtr<ID3D12Resource> m_pIndexBuffer;
+    ComPtr<ID3D12Resource> m_pIndexUploadBuffer;
+    D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
     
     std::array<D3D12_RESOURCE_BARRIER, 2> m_srvBarriers;
 
     // Model meshes
-    std::vector<ModelMesh> m_modelMeshes;
+    std::vector<ModelMesh> m_meshes;
 
     // Model root node
-    ModelNode m_modelRootNode;
+    ModelNode m_rootNode;
+
+    // List of primitives.
+    PrimitiveList m_ppPrimitives;
+
+    // Model acceleration structure.
+    BVHAccelPtr m_pAccel;
 };
 typedef std::unique_ptr<Model> ModelPtr;
 

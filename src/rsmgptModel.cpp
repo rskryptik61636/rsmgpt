@@ -30,6 +30,7 @@ namespace rsmgpt
         const path modelPath,
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
+        const Mat4& initialWorldTransform /*= Mat4::Identity*/,
         const unsigned int
         uiImportOptions /*= aiProcess_MakeLeftHanded | aiProcess_FlipWindingOrder |
         aiProcess_FlipUVs | aiProcessPreset_TargetRealtime_Quality*/ ) :
@@ -41,9 +42,9 @@ namespace rsmgpt
         importer.ReadFile( m_modelPath.generic_string(), uiImportOptions );
 
         // NOTE: V. V. IMP to ensure that GetOrphanedScene() is called as that will result
-        // in m_pModel taking ownership of the aiScene object. Otherwise, the aiScene object
+        // in m_pModelScene taking ownership of the aiScene object. Otherwise, the aiScene object
         // will be destroyed once it goes out of scope.
-        m_pModel.reset( importer.GetOrphanedScene() );	
+        m_pModelScene.reset( importer.GetOrphanedScene() );	
 
         // TODO: Need to implement loading of textures.
 
@@ -51,31 +52,33 @@ namespace rsmgpt
                                                         
         // Initialize the vertex and index lists.
         UINT currVertexOffset( 0 ), currIndexOffset( 0 );
-        m_modelMeshes.resize( m_pModel->mNumMeshes );
+        m_meshes.resize( m_pModelScene->mNumMeshes );
 
-        // Size m_modelIndices to the appropriate length.
-        auto nVertices( 0 ), nIndices( 0 );
-        for( unsigned int i = 0; i < m_pModel->mNumMeshes; ++i )
+        // Size m_indexList to the appropriate length.
+        auto nVertices( 0 ), nIndices( 0 ), nFaces( 0 );
+        for( unsigned int i = 0; i < m_pModelScene->mNumMeshes; ++i )
         {
-            auto& pCurrMesh = m_pModel->mMeshes[ i ];
+            auto& pCurrMesh = m_pModelScene->mMeshes[ i ];
             nVertices += pCurrMesh->mNumVertices;
             for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
             {
                 nIndices += pCurrMesh->mFaces[ j ].mNumIndices;
             }
+            nFaces += pCurrMesh->mNumFaces;
         }
-        m_modelVertices.resize( nVertices );
-        m_modelIndices.resize( nIndices );
+        m_vertexList.resize( nVertices );
+        m_indexList.resize( nIndices );
+        m_ppPrimitives.reserve( nFaces );
 
-        for( unsigned int i = 0, vert = 0, indx = 0; i < m_pModel->mNumMeshes; ++i )
+        for( unsigned int i = 0, vert = 0, indx = 0; i < m_pModelScene->mNumMeshes; ++i )
         {
             // Add all the vertices of the current mesh.
-            const aiMesh *pCurrMesh = m_pModel->mMeshes[ i ];
-            //m_modelVertices.resize( pCurrMesh->mNumVertices );
+            const aiMesh *pCurrMesh = m_pModelScene->mMeshes[ i ];
+            //m_vertexList.resize( pCurrMesh->mNumVertices );
             for( unsigned int j = 0; j < pCurrMesh->mNumVertices; ++j )
             {
                 //ModelVertex currVertex;
-                auto& currVertex = m_modelVertices[ vert++ ];
+                auto& currVertex = m_vertexList[ vert++ ];
                 currVertex.position = Vec3( pCurrMesh->mVertices[ j ].x, pCurrMesh->mVertices[ j ].y, pCurrMesh->mVertices[ j ].z );
 
                 currVertex.tangent = ( pCurrMesh->HasTangentsAndBitangents() ?
@@ -109,9 +112,9 @@ namespace rsmgpt
             }
 
             // Set the vertex count and vertex start index of the current mesh.
-            m_modelMeshes[ i ].vertexCount = pCurrMesh->mNumVertices;
-            m_modelMeshes[ i ].vertexStart = currVertexOffset;
-            currVertexOffset += m_modelMeshes[ i ].vertexCount;
+            m_meshes[ i ].vertexCount = pCurrMesh->mNumVertices;
+            m_meshes[ i ].vertexStart = currVertexOffset;
+            currVertexOffset += m_meshes[ i ].vertexCount;
 
             // Set the no. of faces based of the current mesh.
             m_numFaces += pCurrMesh->mNumFaces;
@@ -121,62 +124,68 @@ namespace rsmgpt
             {
                 const auto& currFace = pCurrMesh->mFaces[ j ];
                 for( unsigned int k = 0; k < currFace.mNumIndices; ++k )
-                    m_modelIndices[ indx++ ] = currFace.mIndices[ k ];
-                    //m_modelIndices.push_back( currFace.mIndices[ k ] );
+                    m_indexList[ indx++ ] = currFace.mIndices[ k ];
+                    //m_indexList.push_back( currFace.mIndices[ k ] );
             }
 
             // Set the index count and start index of the current mesh.
-            m_modelMeshes[ i ].indexCount = pCurrMesh->mNumFaces * pCurrMesh->mFaces[ 0 ].mNumIndices;
-            m_modelMeshes[ i ].indexStart = currIndexOffset;
-            currIndexOffset += m_modelMeshes[ i ].indexCount;
+            m_meshes[ i ].indexCount = pCurrMesh->mNumFaces * pCurrMesh->mFaces[ 0 ].mNumIndices;
+            m_meshes[ i ].indexStart = currIndexOffset;
+            currIndexOffset += m_meshes[ i ].indexCount;
 
             // Set the material index of the current mesh.
-            m_modelMeshes[ i ].materialIndex = pCurrMesh->mMaterialIndex;
+            m_meshes[ i ].materialIndex = pCurrMesh->mMaterialIndex;
         }
 
+        // Initialize the transformation stack with the initialWorldTransform.
+        std::vector<Mat4> transStack( 1, initialWorldTransform );
+
         // Construct the node tree of the model.
-        recursiveNodeConstructor( m_pModel->mRootNode, m_modelRootNode );
+        recursiveNodeConstructor( m_pModelScene->mRootNode, m_rootNode, transStack );
+
+        // Build the BVH acceleration structure.
+        m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::SAH, 4, pDevice, pCommandList );
 
         // @TODO: add implementation here
 
         // Create the vertex buffer.
-        const size_t vertexBufferSize = m_modelVertices.size() * sizeof( ModelVertex );
+        const size_t vertexBufferSize = m_vertexList.size() * sizeof( ModelVertex );
         createBuffer(
             pDevice,
             pCommandList,
-            m_pModelVertexBuffer,
+            m_pVertexBuffer,
             vertexBufferSize,
-            m_pModelVertexUpload,
-            m_modelVertices.data() );
+            m_pVertexUploadBuffer,
+            m_vertexList.data() );
 
         // Initialize the vertex buffer view.
-        m_modelVertexBufferView.BufferLocation = m_pModelVertexBuffer->GetGPUVirtualAddress();
-        m_modelVertexBufferView.StrideInBytes = sizeof( ModelVertex );
-        m_modelVertexBufferView.SizeInBytes = static_cast<UINT>( vertexBufferSize );
+        m_vertexBufferView.BufferLocation = m_pVertexBuffer->GetGPUVirtualAddress();
+        m_vertexBufferView.StrideInBytes = sizeof( ModelVertex );
+        m_vertexBufferView.SizeInBytes = static_cast<UINT>( vertexBufferSize );
 
         // Create the index buffer.
-        const size_t indexBufferSize( m_modelIndices.size() * sizeof( unsigned int ) );
+        const size_t indexBufferSize( m_indexList.size() * sizeof( unsigned int ) );
         createBuffer(
             pDevice,
             pCommandList,
-            m_pModelIndexBuffer,
+            m_pIndexBuffer,
             indexBufferSize,
-            m_pModelIndexUpload,
-            m_modelIndices.data() );
+            m_pIndexUploadBuffer,
+            m_indexList.data() );
 
         // Initialize the index buffer view.
-        m_modelIndexBufferView.BufferLocation = m_pModelIndexBuffer->GetGPUVirtualAddress();
-        m_modelIndexBufferView.SizeInBytes = static_cast<UINT>( indexBufferSize );
-        m_modelIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
+        m_indexBufferView.BufferLocation = m_pIndexBuffer->GetGPUVirtualAddress();
+        m_indexBufferView.SizeInBytes = static_cast<UINT>( indexBufferSize );
+        m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
         // Add resource barriers to indicate that the vertex and index buffers are transitioning from copy dests to srv-s.
         m_srvBarriers = {
             CD3DX12_RESOURCE_BARRIER::Transition(
-                m_pModelVertexBuffer.Get(),
+                m_pVertexBuffer.Get(),
                 D3D12_RESOURCE_STATE_COPY_DEST,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE ),
             CD3DX12_RESOURCE_BARRIER::Transition(
-                m_pModelIndexBuffer.Get(),
+                m_pIndexBuffer.Get(),
                 D3D12_RESOURCE_STATE_COPY_DEST,
                 D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE )
         };
@@ -186,9 +195,9 @@ namespace rsmgpt
     }
 
     // Recursive function which constructs the model's node tree.
-    void Model::recursiveNodeConstructor( aiNode *pCurrNode, ModelNode &currNode )
+    void Model::recursiveNodeConstructor( aiNode *pCurrNode, ModelNode &currNode, std::vector<Mat4>& transStack )
     {
-        //aiNode *pCurrNode = m_pModel->mRootNode;
+        //aiNode *pCurrNode = m_pModelScene->mRootNode;
         if( pCurrNode )
         {
             // Store the transformation of the current node.
@@ -210,11 +219,51 @@ namespace rsmgpt
             /*for( auto i = 0; i < currNode.meshIndexes.size(); ++i )
                 currNode.meshIndexes[ i ] = pCurrNode->mMeshes[ i ];*/
 
+            for( auto i = 0; i < currNode.meshIndexes.size(); i++ )
+            {
+                // Compute the composite transform for the current node.
+                Mat4 currTrans( currNode.transformation );
+                for( auto j = transStack.rbegin(); j != transStack.rend(); ++j )
+                {
+                    currTrans *= *j;
+                }
+
+                // Transform all the primitives in the current node and add them to the primitive list.
+                const auto& currMesh = m_meshes[ currNode.meshIndexes[ i ] ];
+                for( auto j = currMesh.indexStart; j < currMesh.indexCount; j += 3 )
+                {
+                    unsigned int
+                        v1( currMesh.vertexStart + m_indexList[ j ] ),
+                        v2( currMesh.vertexStart + m_indexList[ j + 1 ] ),
+                        v3( currMesh.vertexStart + m_indexList[ j + 2 ] );
+
+                    m_ppPrimitives.push_back( Primitive( m_vertexList, currTrans, v1, v2, v3 ) );
+                }
+            }
+
+            // Push the current node's transformation onto transStack.
+            transStack.push_back( currNode.transformation );
+
             // Populate the children of the current node.
             currNode.childNodes.resize( pCurrNode->mNumChildren );
             for( auto i = 0; i < currNode.childNodes.size(); ++i )
-                recursiveNodeConstructor( pCurrNode->mChildren[ i ], currNode.childNodes[ i ] );
+                recursiveNodeConstructor( pCurrNode->mChildren[ i ], currNode.childNodes[ i ], transStack );
+
+            // Pop the current node's transformation from transStack.
+            transStack.pop_back();
         }
+    }
+
+    // Helper function to transform a ModelVertex by the given transform.
+    ModelVertex Model::transVertex( const ModelVertex& vert, const Mat4& trans )
+    {
+        return {
+            Vec3::Transform( vert.position, trans ),
+            Vec3::Transform( vert.normal, trans.Invert().Transpose() ),
+            vert.texCoord,
+            Vec3::Transform( vert.tangent, trans ),
+            Vec3::Transform( vert.binormal, trans ),
+            vert.color };
     }
 
     // Draws the model.
@@ -229,17 +278,17 @@ namespace rsmgpt
         pCmdList->IASetVertexBuffers(
             0,
             1,
-            &m_modelVertexBufferView );
+            &m_vertexBufferView );
 
-        pCmdList->IASetIndexBuffer( &m_modelIndexBufferView );
+        pCmdList->IASetIndexBuffer( &m_indexBufferView );
 
         // Create an transformation stack with enough space for the transformations of all the child nodes as well as that of the root node.
         std::vector<Mat4> transStack;
-        transStack.reserve( m_modelRootNode.childNodes.size() + 1 );
+        transStack.reserve( m_rootNode.childNodes.size() + 1 );
 
         // Invoke the recursive draw helper function.
         recursiveDrawHelper( 
-            m_modelRootNode, 
+            m_rootNode, 
             viewProj, 
             rootParameterIndex, 
             rootParameterRegisterSpace, 
@@ -260,7 +309,7 @@ namespace rsmgpt
         transStack.push_back( currNode.transformation );
 
         // Draw all the meshes belonging to the current node.
-        const auto &currMeshes = currNode.meshIndexes;
+        const auto& currMeshes = currNode.meshIndexes;
         for( auto i = 0; i < currMeshes.size(); ++i )
         {
             // Compute the current world transformation matrix by multiplying by all the matrices
@@ -286,10 +335,10 @@ namespace rsmgpt
             // Draw the current mesh.
             const auto meshIndex = currMeshes[ i ];
             pCmdList->DrawIndexedInstanced(
-                m_modelMeshes[ meshIndex ].indexCount,
+                m_meshes[ meshIndex ].indexCount,
                 1,
-                m_modelMeshes[ meshIndex ].indexStart,
-                m_modelMeshes[ meshIndex ].vertexStart,
+                m_meshes[ meshIndex ].indexStart,
+                m_meshes[ meshIndex ].vertexStart,
                 0 );            
         }
 
@@ -305,5 +354,5 @@ namespace rsmgpt
 
         // Pop the current node's transformation from the stack.
         transStack.pop_back();
-    }
+    }    
 }

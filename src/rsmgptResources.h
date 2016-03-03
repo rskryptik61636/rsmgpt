@@ -27,6 +27,9 @@
 
 namespace rsmgpt
 {
+    // NOTE: The reason pUpload is being passed in as a parameter instead of being created internally is because
+    //       the resource needs to exist when the command list is executed and creating the resource internally
+    //       would cause it be destroyed once the function exits its scope.
     void createBuffer(
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
