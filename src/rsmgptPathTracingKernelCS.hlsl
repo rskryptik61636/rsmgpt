@@ -72,7 +72,7 @@ bool primHit( in Ray ray, out float t, out float b1, out float b2, inout float4 
                     // Check if the i'th primitive is hit.
                     Primitive prim = gPrimitives[ gBVHNodes[ currentNodeIndex ].primitivesOrSecondChildOffset + i ];
                     Triangle tri = { gVertexBuffer[ prim.p0 ].position, gVertexBuffer[ prim.p1 ].position, gVertexBuffer[ prim.p2 ].position };
-                    if( triangleIntersect( ray, tri, cullBackFacing, t, b1, b2 ) )
+                    if( triangleIntersectWithBackFaceCulling( ray, tri, t, b1, b2 ) )
                     {
                         color = gVertexBuffer[ prim.p0 ].color;
                         return true;

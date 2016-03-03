@@ -97,10 +97,6 @@ struct LinearBVHNode
     Bounds bounds;
     int primitivesOrSecondChildOffset;   // primitivesOffset if leaf or secondChildOffset if interior
     uint nPrimitivesAndAxis;    // NOTE: nPrimitives is stored in bits 0-15 and axis in bits 16-23.
-    //min16uint nPrimitives;  // 0 -> interior node
-    //min16uint axis;          // interior node: xyz   // TODO:   axis was widened to a uint16_t so that it could be represented using min16uint in HLSL. 
-    //                                                //          See if there's a way to keep axis as a uint8_t in C++ and extract it from the min16uint
-    //                                                //          which will consist of axis + pad in HLSL.
 };
 
 // Helper functions to extract nPrimitives and axis from LinearBVHNode's nPrimitivesAndAxis.
@@ -114,7 +110,6 @@ uint axis( in LinearBVHNode node )
     return ( ( node.nPrimitivesAndAxis & 0x00ff0000 ) >> 16 );
 }
 
-//float MachineEpsilon = 1e-10 * 0.5;
 #define MachineEpsilon 1e-10 * 0.5
 
 float gamma( int n )
@@ -210,7 +205,7 @@ bool sphereIntersect( in Ray ray, in Sphere sphere )
 }
 
 // Ray - triangle intersection.
-bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out float t, out float b1, out float b2 )
+bool triangleIntersectWithBackFaceCulling( in Ray ray, in Triangle tri, out float t, out float b1, out float b2 )
 {
     // Compute the edge vectors for (v1 - v0) and (v2 - v0).
     const float3 o = ray.o, d = ray.d, v0 = tri.v0, v1 = tri.v1, v2 = tri.v2;
@@ -219,72 +214,78 @@ bool triangleIntersect( in Ray ray, in Triangle tri, in bool cullBackFacing, out
     // Compute s1 = (d x e2).
     const float3 s1 = cross( d, e2 );
 
-    // Go one of two ways depending on whether back facing triangles are being culled or not.
-    if( cullBackFacing )
+    // Compute the det = (e1.s1). Reject if < 0.
+    const float det = dot( e1, s1 );
+    if( det < 0.000001f )
     {
-        // Compute the det = (e1.s1). Reject if < 0.
-        const float det = dot( e1, s1 );
-        if( det < 0.000001f )
-        {
-            return false;
-        }
-
-        // Compute s = o - v0.
-        const float3 s = o - v0;
-
-        // Compute b1 = s1.s and return if < 0 or > det.
-        b1 = dot( s1, s );
-        if( b1 < 0.f || b1 > det )
-        {
-            return false;
-        }
-
-        // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
-        const float3 s2 = cross( s, e1 );
-        b2 = dot( s2, d );
-        if( b2 < 0.f || ( b1 + b2 ) > det )
-        {
-            return false;
-        }
-
-        // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
-        const float invDet = 1.f / det;
-        t = dot( s2, e2 ) * invDet;
-        b1 *= invDet;
-        b2 *= invDet;
-    }
-    else
-    {
-        // Compute the det = (e1.s1). Reject if < 0.
-        const float det = dot( e1, s1 );
-        if( det > -0.000001f && det < 0.000001f )
-        {
-            return false;
-        }
-
-        // Compute s = o - v0.
-        const float3 s = o - v0;
-
-        // Compute b1 = s1.s and return if < 0 or > det.
-        const float invDet = 1.f / det;
-        b1 = dot( s1, s ) * invDet;
-        if( b1 < 0.f || b1 > 1.f )
-        {
-            return false;
-        }
-
-        // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
-        const float3 s2 = cross( s, e1 );
-        b2 = dot( s2, d ) * invDet;
-        if( b2 < 0 || ( b1 + b2 ) > 1.f )
-        {
-            return false;
-        }
-
-        // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
-        t = dot( s2, e2 ) * invDet;
+        return false;
     }
 
+    // Compute s = o - v0.
+    const float3 s = o - v0;
+
+    // Compute b1 = s1.s and return if < 0 or > det.
+    b1 = dot( s1, s );
+    if( b1 < 0.f || b1 > det )
+    {
+        return false;
+    }
+
+    // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
+    const float3 s2 = cross( s, e1 );
+    b2 = dot( s2, d );
+    if( b2 < 0.f || ( b1 + b2 ) > det )
+    {
+        return false;
+    }
+
+    // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
+    const float invDet = 1.f / det;
+    t = dot( s2, e2 ) * invDet;
+    b1 *= invDet;
+    b2 *= invDet;
+    
+    return true;
+}
+
+bool triangleIntersectWithoutBackFaceCulling( in Ray ray, in Triangle tri, in bool cullBackFacing, out float t, out float b1, out float b2 )
+{
+    // Compute the edge vectors for (v1 - v0) and (v2 - v0).
+    const float3 o = ray.o, d = ray.d, v0 = tri.v0, v1 = tri.v1, v2 = tri.v2;
+    const float3 e1 = v1 - v0, e2 = v2 - v0;
+
+    // Compute s1 = (d x e2).
+    const float3 s1 = cross( d, e2 );
+
+    // Compute the det = (e1.s1). Reject if < 0.
+    const float det = dot( e1, s1 );
+    if( det > -0.000001f && det < 0.000001f )
+    {
+        return false;
+    }
+
+    // Compute s = o - v0.
+    const float3 s = o - v0;
+
+    // Compute b1 = s1.s and return if < 0 or > det.
+    const float invDet = 1.f / det;
+    b1 = dot( s1, s ) * invDet;
+    if( b1 < 0.f || b1 > 1.f )
+    {
+        return false;
+    }
+
+    // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
+    const float3 s2 = cross( s, e1 );
+    b2 = dot( s2, d ) * invDet;
+    if( b2 < 0 || ( b1 + b2 ) > 1.f )
+    {
+        return false;
+    }
+
+    // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
+    t = dot( s2, e2 ) * invDet;
+    
     return true;
 }
 
