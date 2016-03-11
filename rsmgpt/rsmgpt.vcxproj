@@ -290,6 +290,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\src\rsmgptBasicCommon.hlsli" />
+    <None Include="..\src\rsmgptLighting.hlsli" />
     <None Include="..\src\rsmgptPathTracingCommon.hlsli" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

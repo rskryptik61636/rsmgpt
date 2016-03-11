@@ -45,7 +45,8 @@ public:
         const path modelPath,
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
-        const Mat4& initialWorldTransform = Mat4::Identity,
+        //const Mat4& initialWorldTransform = Mat4::Identity,
+        const bool isDrawable = false,
         const unsigned int uiImportOptions = 
             aiProcess_MakeLeftHanded | 
             aiProcess_FlipWindingOrder |
@@ -67,10 +68,13 @@ public:
 
     const BVHAccel* accel() const { return m_pAccel.get(); }
 
+    const std::vector<ModelVertex>& vertexList() const { return m_vertexList; }
+
     // Accessor functions for the no. of vertices, indices and triangle faces.
     std::size_t numVertices() const { return m_vertexList.size(); }
     std::size_t numIndices() const { return m_indexList.size(); }
     std::size_t numFaces() const { return m_numFaces; }
+    std::size_t numPrimitives() const { return m_ppPrimitives.size(); }
 
     // Returns the input element desc for model vertices.
     static std::array<D3D12_INPUT_ELEMENT_DESC, 6> inputElementDesc()
@@ -100,7 +104,7 @@ private:
         std::vector<Mat4>& transStack );
 
     // Recursive function which constructs the model's node tree.
-    void recursiveNodeConstructor( aiNode* pCurrNode, ModelNode& currNode, std::vector<Mat4>& transStack );
+    void recursiveNodeConstructor( /*const Mat4& initialWorldTransform,*/ aiNode* pCurrNode, ModelNode& currNode, std::vector<Mat4>& transStack );
 
     // Helper function to transform a ModelVertex by the given transform.
     ModelVertex transVertex( const ModelVertex& vert, const Mat4& trans );
@@ -110,6 +114,9 @@ private:
 
     // Model
     std::unique_ptr<const aiScene> m_pModelScene;
+
+    // Flag specifying that the model will be drawn.
+    bool m_isDrawable;
     
     // Model textures
     //std::map<std::string, ShaderResourceViewPtr> m_modelDiffuseTextures, m_modelSpecularTextures, m_modelNormalTextures;
@@ -127,7 +134,7 @@ private:
     ComPtr<ID3D12Resource> m_pIndexUploadBuffer;
     D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
     
-    std::array<D3D12_RESOURCE_BARRIER, 2> m_srvBarriers;
+    std::vector<D3D12_RESOURCE_BARRIER> m_srvBarriers;
 
     // Model meshes
     std::vector<ModelMesh> m_meshes;

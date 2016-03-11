@@ -30,12 +30,16 @@ namespace rsmgpt
         const path modelPath,
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
-        const Mat4& initialWorldTransform /*= Mat4::Identity*/,
-        const unsigned int
-        uiImportOptions /*= aiProcess_MakeLeftHanded | aiProcess_FlipWindingOrder |
-        aiProcess_FlipUVs | aiProcessPreset_TargetRealtime_Quality*/ ) :
+        //const Mat4& initialWorldTransform /*= Mat4::Identity*/,
+        const bool isDrawable /*= false*/,
+        const unsigned int uiImportOptions /*= 
+            aiProcess_MakeLeftHanded | 
+            aiProcess_FlipWindingOrder |
+            aiProcess_FlipUVs | 
+            aiProcessPreset_TargetRealtime_Quality*/ ) :
         m_modelPath(modelPath),
-        m_numFaces( 0 )
+        m_numFaces( 0 ),
+        m_isDrawable( isDrawable )
     {
         // Create an importer and read the model.
         Assimp::Importer importer;
@@ -137,11 +141,10 @@ namespace rsmgpt
             m_meshes[ i ].materialIndex = pCurrMesh->mMaterialIndex;
         }
 
-        // Initialize the transformation stack with the initialWorldTransform.
-        std::vector<Mat4> transStack( 1, initialWorldTransform );
+        std::vector<Mat4> transStack;
 
         // Construct the node tree of the model.
-        recursiveNodeConstructor( m_pModelScene->mRootNode, m_rootNode, transStack );
+        recursiveNodeConstructor( /*initialWorldTransform,*/ m_pModelScene->mRootNode, m_rootNode, transStack );
 
         // Build the BVH acceleration structure.
         m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::SAH, 4, pDevice, pCommandList );
@@ -152,9 +155,15 @@ namespace rsmgpt
         const size_t vertexBufferSize = m_vertexList.size() * sizeof( ModelVertex );
         createBuffer(
             pDevice,
-            pCommandList,
             m_pVertexBuffer,
+            &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
+            D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
+            D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
             vertexBufferSize,
+            D3D12_RESOURCE_FLAG_NONE,
+            0,
+            nullptr,
+            pCommandList,
             m_pVertexUploadBuffer,
             m_vertexList.data() );
 
@@ -163,39 +172,59 @@ namespace rsmgpt
         m_vertexBufferView.StrideInBytes = sizeof( ModelVertex );
         m_vertexBufferView.SizeInBytes = static_cast<UINT>( vertexBufferSize );
 
-        // Create the index buffer.
-        const size_t indexBufferSize( m_indexList.size() * sizeof( unsigned int ) );
-        createBuffer(
-            pDevice,
-            pCommandList,
-            m_pIndexBuffer,
-            indexBufferSize,
-            m_pIndexUploadBuffer,
-            m_indexList.data() );
+        // Create the index buffer iff the model is drawable.
+        if( m_isDrawable )
+        {
+            const size_t indexBufferSize( m_indexList.size() * sizeof( unsigned int ) );
+            createBuffer(
+                pDevice,
+                m_pIndexBuffer,
+                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
+                D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
+                D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
+                indexBufferSize,
+                D3D12_RESOURCE_FLAG_NONE,
+                0,
+                nullptr,
+                pCommandList,
+                m_pIndexUploadBuffer,
+                m_indexList.data() );
 
-        // Initialize the index buffer view.
-        m_indexBufferView.BufferLocation = m_pIndexBuffer->GetGPUVirtualAddress();
-        m_indexBufferView.SizeInBytes = static_cast<UINT>( indexBufferSize );
-        m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+            // Initialize the index buffer view.
+            m_indexBufferView.BufferLocation = m_pIndexBuffer->GetGPUVirtualAddress();
+            m_indexBufferView.SizeInBytes = static_cast<UINT>( indexBufferSize );
+            m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 
-        // Add resource barriers to indicate that the vertex and index buffers are transitioning from copy dests to srv-s.
-        m_srvBarriers = {
-            CD3DX12_RESOURCE_BARRIER::Transition(
+            // Add resource barriers to indicate that the vertex and index buffers are transitioning from copy dests to srv-s if the model is drawable,
+            // else add a resouce barrier only for the vertex buffer.
+            m_srvBarriers = {
+                CD3DX12_RESOURCE_BARRIER::Transition(
                 m_pVertexBuffer.Get(),
-                D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE ),
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                m_pIndexBuffer.Get(),
-                D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE )
-        };
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE ),
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_pIndexBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE )
+            };
+        }
+        else
+        {
+            m_srvBarriers = {
+                CD3DX12_RESOURCE_BARRIER::Transition(
+                m_pVertexBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE )
+            };
+        } 
+
         pCommandList->ResourceBarrier( 
             static_cast<UINT>( m_srvBarriers.size() ), 
             m_srvBarriers.data() );
     }
 
     // Recursive function which constructs the model's node tree.
-    void Model::recursiveNodeConstructor( aiNode *pCurrNode, ModelNode &currNode, std::vector<Mat4>& transStack )
+    void Model::recursiveNodeConstructor( /*const Mat4& initialWorldTransform,*/ aiNode *pCurrNode, ModelNode &currNode, std::vector<Mat4>& transStack )
     {
         //aiNode *pCurrNode = m_pModelScene->mRootNode;
         if( pCurrNode )
@@ -248,7 +277,7 @@ namespace rsmgpt
             // Populate the children of the current node.
             currNode.childNodes.resize( pCurrNode->mNumChildren );
             for( auto i = 0; i < currNode.childNodes.size(); ++i )
-                recursiveNodeConstructor( pCurrNode->mChildren[ i ], currNode.childNodes[ i ], transStack );
+                recursiveNodeConstructor( /*initialWorldTransform,*/ pCurrNode->mChildren[ i ], currNode.childNodes[ i ], transStack );
 
             // Pop the current node's transformation from transStack.
             transStack.pop_back();
@@ -274,6 +303,9 @@ namespace rsmgpt
         const UINT rootParameterRegisterSpace, 
         ID3D12GraphicsCommandList* pCmdList )
     {
+        // Model must be drawable.
+        assert( m_isDrawable );
+
         // Set the model's vertex and index buffers.
         pCmdList->IASetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
         pCmdList->IASetVertexBuffers(

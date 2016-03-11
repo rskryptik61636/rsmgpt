@@ -355,11 +355,13 @@ bool triangleIntersectV2( const Ray& ray, const Triangle& tri, float& t, float& 
 
 int main( int argc, char *argv[] )
 {
-    // Test ray-box intersection.
+    // Test ray intersection with the spider model.
     Ray ray(
-        Point3(0, 0, -20),    // Origin
-        Vec3(0, 0, 1)       // Direction
+        Point3(0, 17.25, -250),    // Origin
+        Vec3(-0.175084, -0.040588, 0.983716)       // Direction
         );
+
+#if 0
     Bounds3f box(
         Point3( -10, -10, -10 ),    // pMin
         Point3( 10, 10, 10 )        // pMax
@@ -369,12 +371,11 @@ int main( int argc, char *argv[] )
     const Vec3 invDir = Vec3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
     const int dirIsNeg[ 3 ] = { ray.d.x < 0.f, ray.d.y < 0.f, ray.d.z < 0.f };
     const std::string verdict = box.IntersectP( ray, invDir, dirIsNeg ) ? "hits " : " misses";
-    std::cout 
+    std::cout
         << "Ray "
         << verdict
         << " the box\n";
 
-#if 0
     // Create a debug camera object.
     const float
         m_width( 1280 ),

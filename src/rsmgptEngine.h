@@ -100,11 +100,14 @@ namespace rsmgpt {
         // Per frame constants.
         struct PTCbPerFrame
         {
+            Mat4        gWorld;         // World space transformation matrix.
+            Mat4        gWorldInvTrans; // World space transformation matrix inverse transpose (for the triangle's surface normal).
             Mat4        gRasterToWorld; // Raster to world space transformation matrix.
             Vec3        gCamPos;        // Camera position.
             unsigned    gNumFaces;      // No. of triangle faces.
+            int         gCursorPos[2];  // Cursor position.
 
-            float   pad[ 44 ];         // Constant buffers are 256 byte aligned.
+            byte        pad[ 2 * 256 - ( 3 * sizeof( Mat4 ) + sizeof( Vec3 ) + sizeof( unsigned ) + 2 * sizeof( int ) ) ];      // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
         // Path tracing mode graphics root signature parameter offsets.
@@ -118,7 +121,7 @@ namespace rsmgpt {
         enum PTComputeRootParameters
         {
             PTCbvCbPerFrame,              // Cbv for the cbPerFrame constant buffer.
-            PTComputeSrvTable,            // Srvs for the vertex, index, primitive and BVH structured buffers.
+            PTComputeSrvTable,            // Srvs for the vertex, primitive and BVH structured buffers.
             PTComputeUavTable,            // Uav for the path tracing output to be rendered.    
             PTComputeRootParametersCount
         };
@@ -127,9 +130,9 @@ namespace rsmgpt {
         enum PTHeapOffsets
         {
             PTComputeCbvOffset = 0,                                       // Path tracing kernel constant buffer.
-            PTComputeSrvOffset = PTComputeCbvOffset + 1,                  // Path tracing kernel vertex, index buffer, primitive and BVH SRVs.
-            PTComputeUavOffset = PTComputeSrvOffset + 4,                  // Path tracing kernel render output UAV.
-            PTGfxSrvOffset = PTComputeUavOffset + 1,                      // Path tracing kernel render output SRV (used to finally display the rendered output).
+            PTComputeSrvOffset = PTComputeCbvOffset + 1,                  // Path tracing kernel vertex buffer, primitive and BVH SRVs.
+            PTComputeUavOffset = PTComputeSrvOffset + 3,                  // Path tracing kernel render output UAV.
+            PTGfxSrvOffset = PTComputeUavOffset + 2,                      // Path tracing kernel render output SRV (used to finally display the rendered output).
             PTCbvSrvUavDescriptorCountPerFrame = PTGfxSrvOffset + 1
         };
 
@@ -140,6 +143,13 @@ namespace rsmgpt {
             DebugGfxPSBasicOutput,                       // Debug PS BasicOutput constant buffer which is bound to bind slot 0 and register space 1.
             DebugGfxRootParametersCount
         };
+
+        // Cursor position and grid/block x/y indices.
+        POINT m_cursorPos;
+        UINT xGrid, yGrid, xBlock, yBlock;
+
+        // Debug info.
+        DebugInfo m_debugInfo;
 
         // Each triangle gets its own constant buffer per frame.
         std::vector<PTCbPerFrame> m_constantBufferData;
@@ -190,6 +200,8 @@ namespace rsmgpt {
         ComPtr<IDWriteTextFormat> m_textFormat;
         ComPtr<ID3D12Resource> m_vertexBuffer;
         ComPtr<ID3D12Resource> m_constantBuffer;
+        ComPtr<ID3D12Resource> m_debugInfoDefault;
+        ComPtr<ID3D12Resource> m_debugInfoReadback;
         ComPtr<ID3D12Resource> m_depthStencil;
         ComPtr<ID3D12Resource> m_pathTracerOutput;
         ComPtr<ID3D12QueryHeap> m_timestampQueryHeap;
@@ -197,7 +209,10 @@ namespace rsmgpt {
         UINT64 m_computeCommandQueueTimestampFrequency;
         UINT64 m_pathTracingTime;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+
+        // Model params.
         ModelPtr m_pModel;
+        Mat4 m_modelWorldTransform;
 
         // Camera objects.
         PTPerspectiveCameraPtr m_pPTPersepectiveCamera;

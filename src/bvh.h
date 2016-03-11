@@ -312,10 +312,25 @@ struct Primitive
         const unsigned int p1, 
         const unsigned int p2 );
 
-    Bounds3f WorldBound();    
+    Bounds3f WorldBound();
+
+    bool IntersectP( 
+        const std::vector<ModelVertex>& vertList, 
+        const Ray& ray, 
+        float& t,
+        float& b1,
+        float& b2,
+        const bool cullBackFacing = true ) const;
 };
 //typedef std::shared_ptr<Primitive> PrimitivePtr;
 typedef std::vector<Primitive/*Ptr*/> PrimitiveList;
+
+// Debug info.
+struct DebugInfo
+{
+    Ray ray;
+    Primitive hitPrim;
+};
 
 // BVHAccel Declarations
 class BVHAccel /*: public Aggregate*/ {
@@ -339,10 +354,9 @@ class BVHAccel /*: public Aggregate*/ {
     const int nBVHNodes() const { return totalNodes; }
     const UINT nodeSize() const;    // NOTE: Defining in bvh.cpp because that is where LinearBVHNode is defined.
 
-    // NOTE: We're going to be doing intersection testing on the GPU. May not need the intersection testing functions right now.
+    bool IntersectP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const;
 #if 0
-    bool Intersect( const Ray &ray, SurfaceInteraction *isect ) const;
-    bool IntersectP( const Ray &ray ) const;
+    bool Intersect( const Ray &ray, SurfaceInteraction *isect ) const;    
 #endif // 0
 
 

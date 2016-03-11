@@ -37,6 +37,11 @@ namespace rsmgpt
 	// Engine ctor.
     Engine::Engine( const path sceneFile, const OperationMode operationMode /*= OM_PATH_TRACER*/ ) :
         DXSample( 1280, 1024, L"rsmgpt" ),
+        m_cursorPos{ 0, 0 },
+        xGrid( 0 ),
+        yGrid( 0 ),
+        xBlock( 0 ),
+        yBlock( 0 ),
         m_opMode( operationMode ),
         m_fenceValues{},
         m_frameIndex( 0 )
@@ -137,6 +142,35 @@ namespace rsmgpt
 
 	void Engine::OnUpdate()
 	{
+        // Update the cursor pos and the grid/block x/y indices.
+        static const int titleBarHeight = GetSystemMetrics( SM_CYSIZE );
+        static const int borderWidth = GetSystemMetrics( SM_CXBORDER );
+        static const int cursorHalfWidth = GetSystemMetrics( SM_CXCURSOR ) / 2;
+        static const int cursorHalfHeight = GetSystemMetrics( SM_CYCURSOR ) / 2;
+        POINT screenCurPos;
+        RECT winRect;
+        GetCursorPos( &screenCurPos );
+        //ScreenToClient( m_hwnd, &screenCurPos );
+        GetWindowRect( m_hwnd, &winRect );
+        m_cursorPos = { 
+            screenCurPos.x - winRect.left - borderWidth - cursorHalfWidth, 
+            static_cast<LONG>( m_height ) - ( screenCurPos.y - winRect.top - titleBarHeight - cursorHalfHeight ) };
+        xGrid = m_cursorPos.x / 16;
+        yGrid = m_cursorPos.y / 16;
+        xBlock = m_cursorPos.x % 16;
+        yBlock = m_cursorPos.y % 16;
+
+        // Map the debug info resource.
+        void* pDebugInfo = nullptr;
+        ThrowIfFailed( m_debugInfoReadback->Map( 0, nullptr, &pDebugInfo ) );
+
+        // Copy into m_debugInfo.
+        memcpy_s( &m_debugInfo, sizeof( DebugInfo ), pDebugInfo, sizeof( DebugInfo ) );
+
+        // Unmap the debug info struct.
+        m_debugInfoReadback->Unmap( 0, nullptr );
+        pDebugInfo = nullptr;
+
         // Move the camera.
         Camera* pCamera = nullptr;
         switch( m_opMode )
@@ -303,7 +337,7 @@ namespace rsmgpt
         ComPtr<IDXGIFactory4> factory;
         ThrowIfFailed( CreateDXGIFactory1( IID_PPV_ARGS( &factory ) ) );
 
-        // TODO: Remove when done testing.
+        // NOTE: Uncomment to enable the WARP device.
         //m_useWarpDevice = true;
 
         if( m_useWarpDevice )
@@ -429,13 +463,20 @@ namespace rsmgpt
 
             //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
             {
-                ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
+                createBuffer(
+                    m_d3d12Device.Get(),
+                    m_timestampResultBuffer,
+                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
+                    D3D12_HEAP_FLAG_NONE,
+                    D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
+                    resultBufferSize );
+                /*ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                     &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
                     D3D12_HEAP_FLAG_NONE,
                     &CD3DX12_RESOURCE_DESC::Buffer( resultBufferSize ),
                     D3D12_RESOURCE_STATE_COPY_DEST,
                     nullptr,
-                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );
+                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );*/
 
                 ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
             }
@@ -522,12 +563,12 @@ namespace rsmgpt
             m_computeRootSignature.reset( PTComputeRootParametersCount, 0 );
             m_computeRootSignature[ PTCbvCbPerFrame ].InitAsConstantBufferView( 0 );
 
-            // The second compute root parameter is a table to the model vertex, index buffer, primitive and BVH node array SRVs.
-            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0 );
+            // The second compute root parameter is a table to the model vertex buffer, primitive and BVH node array SRVs.
+            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0 );
             m_computeRootSignature[ PTComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
 
             // The third compute root parameter is a table to the render output UAVs.
-            CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0 );
+            CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0 );
             m_computeRootSignature[ PTComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
             m_computeRootSignature.finalize( m_d3d12Device.Get() );
         }
@@ -646,9 +687,15 @@ namespace rsmgpt
             // Create the vertex buffer resource.
             createBuffer(
                 m_d3d12Device.Get(),
-                m_commandList.Get(),
                 m_vertexBuffer,
+                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
+                D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
+                D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
                 vertexBufferSize,
+                D3D12_RESOURCE_FLAG_NONE,
+                0,
+                nullptr,
+                m_commandList.Get(),
                 vertexBufferUpload,
                 reinterpret_cast<void*>( triangleVertices ) );
 
@@ -698,38 +745,47 @@ namespace rsmgpt
             m_pDsvHeap->addDSV( m_depthStencil.Get(), &depthStencilDesc, "dsv" );
         }
 
+        // TODO: Test variable to easily switch between the cube and spider models. Remove once we are able to read params from an XML file.
+        const bool isSpider = true;
+
         // Create the constant buffers.
         {
             // We're dealing with only one constant buffer per frame.
             const UINT constantBufferDataSize = /*FrameCount **/ sizeof( PTCbPerFrame );
 
             // Create an upload heap for the constant buffer data.
-            ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
+            createBuffer(
+                m_d3d12Device.Get(),
+                m_constantBuffer,
+                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),
+                D3D12_HEAP_FLAG_NONE,
+                D3D12_RESOURCE_STATE_GENERIC_READ,
+                constantBufferDataSize );
+            /*ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                 &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),
                 D3D12_HEAP_FLAG_NONE,
                 &CD3DX12_RESOURCE_DESC::Buffer( constantBufferDataSize ),
                 D3D12_RESOURCE_STATE_GENERIC_READ,
                 nullptr,
-                IID_PPV_ARGS( &m_constantBuffer ) ) );
+                IID_PPV_ARGS( &m_constantBuffer ) ) );*/
 
             // TODO: Testing out camera transforms. Remove when done testing.
-            //const float fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );
             const float
                 focalLength( 1.f ),
                 lensRadius( 1.f ),
                 fWidth( static_cast<float>( m_width ) ),
                 fHeight( static_cast<float>( m_height ) ),
-                fov( .25f * XM_PI /*90*/ ),
+                fov( .25f * XM_PI ),
                 aspectRatio( fWidth / fHeight ),
-                nearPlane( /*1e-2f*/ 1.f ),
+                nearPlane( 1.f ),
                 farPlane( 1000.f ),
-                motionFactor( .5f ),
+                motionFactor( isSpider ? .75f : .05f ),
                 rotationFactor( .05f ),
                 screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
                 screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
-            const Vec3 eye( 0, 0, -250 /*-10*/ ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+            const Vec3 eye( 0, 0, isSpider ? -250 : -10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
             m_pPTPersepectiveCamera.reset(
                 new PTPerspectiveCamera(
                     eye,
@@ -747,92 +803,51 @@ namespace rsmgpt
                     rotationFactor ) );
             const Mat4 rasterToWorld( m_pPTPersepectiveCamera->rasterToWorld() );
 
-            // TODO: Remove when done testing.
-#if 0
-            // Perspective transformation matrix. The canonical form transforms points to homogenous clip space in [-1,1].
-            const float zScale( farPlane / ( farPlane - nearPlane ) ), zTrans( -( farPlane * nearPlane ) / ( farPlane - nearPlane ) );
-            const float xScale( 1 / tanf( fov / 2 ) ), yScale( xScale );
-            const Mat4 worldToCamera( Mat4::Identity );
-            const Mat4 cameraToScreen( Mat4::CreateScale( xScale, yScale, zScale ) * Mat4::CreateTranslation( 0, 0, zTrans ) );
-            //const Mat4 cameraToScreen(
-            //    xScale, 0.f, 0.f, 0.f,
-            //    0.f, yScale, 0.f, 0.f,
-            //    0.f, 0.f, zScale, 1.f,
-            //    0.f, 0.f, zTrans, 0.f );  // Transforms from camera space to D3D style clip space (x,y in [-1,1] and z in [0,1])
+            // Ensure that m_cbPerFrame's size is a multiple of 256.
+            static_assert( ( sizeof( m_cbPerFrame ) % 256 ) == 0, "m_cbPerFrame's size must be a multiple of 256" );
 
-            // Transforms from clip space to raster (window) space.
-            const Mat4 screenToRaster(
-                Mat4::CreateTranslation( -screenxmin, -screenymin, 0.f ) *  // Translate to top left corner of viewport.
-                Mat4::CreateScale( 1.f / ( screenxmax - screenxmin ), 1.f / ( screenymax - screenymin ), 1.f ) *    // Transform to NDC [0,1].
-                Mat4::CreateScale( fWidth, fHeight, 1.f ) );    // Transforms to raster coords [0,width/height-1]
-            const Mat4 rasterToWorld( ( worldToCamera * cameraToScreen * screenToRaster ).Invert() );    // Inverse transform from raster space to camera space.  
-
-                                                                                                         // TODO: Remove when done testing.
-                                                                                                         //const Mat4 rasterToWorld( /*screenToRaster.Invert()*/ cameraToScreen );    // Transforms to raster coords [0,width/height-1]
-
-                                                                                                         //// Test transform a raster space coord to camera space.
-                                                                                                         //Vec3 pt( 640, 512, nearPlane );
-                                                                                                         ////Vec4 pt( 10, 10, 0, 1 );
-                                                                                                         //Vec3 res = Vec3::Transform( pt, rasterToWorld );
-                                                                                                         //res.Normalize();
-
-                                                                                                         ////Math::Vector4 res = Math::Vector4::Transform( Math::Vector4( 10, 0, 0, 1 ), /*Mat4::Identity*/ cameraToScreen );       
-
-                                                                                                         //// Initialize the constant buffer data.
-                                                                                                         //m_cbPerFrame.gRasterToWorld = rasterToWorld.Transpose();
-#endif // 0
-
-                                                                                                         // Get the GPU address of m_cbPerFrame.
-            auto cbPerFrameGpuVA = m_constantBuffer->GetGPUVirtualAddress();
-
-            // Create the CBV for m_cbPerFrame. Note that CreateConstantBufferView returns nothing as it creates the CBV at the location
-            // in the descriptor heap designated by cbvDesc.BufferLocation and cpuHandle.
-            D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-            cbvDesc.SizeInBytes = sizeof( PTCbPerFrame );
-            cbvDesc.BufferLocation = cbPerFrameGpuVA;            // Set the buffer location of the CBV to the GPU address to the current location in the descriptor heap.
-            m_pCsuHeap->addCBV( &cbvDesc, "m_cbPerFrame" );
-
-            // Map the constant buffers. We don't unmap this until the app closes.
-            // Keeping things mapped for the lifetime of the resource is okay.
-            ThrowIfFailed( m_constantBuffer->Map( 0, nullptr, reinterpret_cast<void**>( &m_pCbvDataBegin ) ) );
         }
 
         // Load the test model.
         {
-            const path modelPath( "N:\\rsmgpt\\models\\spider.obj" );
-            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );
-
-            // Create SRVs for the model's vertex and index buffers.
-            D3D12_SHADER_RESOURCE_VIEW_DESC vbDesc;
-            vbDesc.Format = DXGI_FORMAT_UNKNOWN;
-            vbDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-            vbDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            vbDesc.Buffer.FirstElement = 0;
-            vbDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-            vbDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->numVertices() );
-            vbDesc.Buffer.StructureByteStride = sizeof( ModelVertex );
-            m_pCsuHeap->addSRV( m_pModel->vertexBuffer(), &vbDesc, "gVertexBuffer" );
-
-            D3D12_SHADER_RESOURCE_VIEW_DESC ibDesc( vbDesc );
-            ibDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->numIndices() );
-            ibDesc.Buffer.StructureByteStride = sizeof( unsigned int );
-            m_pCsuHeap->addSRV( m_pModel->indexBuffer(), &ibDesc, "gIndexBuffer" );
-
-            // Create SRVs for the model's primitive and BVH node arrays.
-            D3D12_SHADER_RESOURCE_VIEW_DESC primDesc( ibDesc );
-            primDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nPrimitives() );
-            primDesc.Buffer.StructureByteStride = m_pModel->accel()->primitiveSize();
-            m_pCsuHeap->addSRV( m_pModel->accel()->primitivesResource(), &primDesc, "gPrimitives" );
-
-            D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
-            nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
-            nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
-            m_pCsuHeap->addSRV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
+            m_modelWorldTransform = /*isSpider ? Mat4::CreateRotationY( -0.5 * XM_PI ) :*/ Mat4::Identity;
+            
+            const path modelPath( isSpider ? "N:\\rsmgpt\\models\\spider.obj" : "N:\\rsmgpt\\models\\test1.obj" );
+            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );            
         }
 
+        // TODO: Testing ray-model intersection. Remove when done testing.
+//#ifdef _DEBUG
+//        {
+//            Ray ray(
+//                Point3( 0, 17.25, -250 ),    // Origin
+//                Vec3( -0.175084, -0.040588, 0.983716 )       // Direction
+//                );
+//            float t, b1, b2;
+//            Primitive hitPrim;
+//            auto& vertexList = m_pModel->vertexList();
+//            if( m_pModel->accel()->IntersectP( vertexList, ray, hitPrim, t, b1, b2 ) )
+//            {
+//                const auto&
+//                    v0 = vertexList[ hitPrim.p0 ],
+//                    v1 = vertexList[ hitPrim.p1 ],
+//                    v2 = vertexList[ hitPrim.p2 ];
+//                const auto&
+//                    n0 = v0.normal,
+//                    n1 = v1.normal,
+//                    n2 = v2.normal;
+//                Vec3 normal = b1 * n0 + b2 * n1 + ( 1 - b1 - b2 ) * n2;
+//                /*Vec3 e0( v1.position - v0.position ), e1( v2.position - v0.position );
+//                Vec3 normal = e0.Cross( e1 );
+//                normal.Normalize();*/
+//                printf( "Let's see what we have here..." );
+//            }
+//        }
+//#endif  // _DEBUG
+
+        const auto pathTracerOutputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         {
             // Create the path tracer output texture.
-            const auto pathTracerOutputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
             ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                 &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
                 D3D12_HEAP_FLAG_NONE,
@@ -849,6 +864,65 @@ namespace rsmgpt
                 nullptr,
                 IID_PPV_ARGS( &m_pathTracerOutput )
                 ) );
+        }
+
+        // Create the debug info default and readback resources.
+        {
+            createBuffer(
+                m_d3d12Device.Get(),
+                m_debugInfoDefault,
+                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
+                D3D12_HEAP_FLAG_NONE,
+                D3D12_RESOURCE_STATE_COPY_SOURCE,
+                sizeof( DebugInfo ),
+                D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS );
+
+            createBuffer(
+                m_d3d12Device.Get(),
+                m_debugInfoReadback,
+                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
+                D3D12_HEAP_FLAG_NONE,
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                sizeof( DebugInfo ) );
+        }
+
+        // Add all views to the descriptor heap.
+        {
+            // Get the GPU address of m_cbPerFrame.
+            auto cbPerFrameGpuVA = m_constantBuffer->GetGPUVirtualAddress();
+
+            // Create the CBV for m_cbPerFrame. Note that CreateConstantBufferView returns nothing as it creates the CBV at the location
+            // in the descriptor heap designated by cbvDesc.BufferLocation and cpuHandle.
+            D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+            cbvDesc.SizeInBytes = sizeof( PTCbPerFrame );
+            cbvDesc.BufferLocation = cbPerFrameGpuVA;            // Set the buffer location of the CBV to the GPU address to the current location in the descriptor heap.
+            m_pCsuHeap->addCBV( &cbvDesc, "m_cbPerFrame" );
+
+            // Map the constant buffers. We don't unmap this until the app closes.
+            // Keeping things mapped for the lifetime of the resource is okay.
+            ThrowIfFailed( m_constantBuffer->Map( 0, nullptr, reinterpret_cast<void**>( &m_pCbvDataBegin ) ) );
+
+            // Create SRVs for the model's vertex and index buffers.
+            D3D12_SHADER_RESOURCE_VIEW_DESC vbDesc;
+            vbDesc.Format = DXGI_FORMAT_UNKNOWN;
+            vbDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+            vbDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            vbDesc.Buffer.FirstElement = 0;
+            vbDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+            vbDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->numVertices() );
+            vbDesc.Buffer.StructureByteStride = sizeof( ModelVertex );
+            m_pCsuHeap->addSRV( m_pModel->vertexBuffer(), &vbDesc, "gVertexBuffer" );
+
+            // Create SRVs for the model's primitive and BVH node arrays.
+            D3D12_SHADER_RESOURCE_VIEW_DESC primDesc( vbDesc );
+            primDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nPrimitives() );
+            primDesc.Buffer.StructureByteStride = m_pModel->accel()->primitiveSize();
+            m_pCsuHeap->addSRV( m_pModel->accel()->primitivesResource(), &primDesc, "gPrimitives" );
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
+            nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
+            nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
+            m_pCsuHeap->addSRV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
 
             // Create the UAV to the path tracer output.
             D3D12_UNORDERED_ACCESS_VIEW_DESC pathTracerOutputUavDesc = {};
@@ -857,6 +931,15 @@ namespace rsmgpt
             pathTracerOutputUavDesc.Texture2D.MipSlice = 0;
             pathTracerOutputUavDesc.Texture2D.PlaneSlice = 0;
             m_pCsuHeap->addUAV( m_pathTracerOutput.Get(), &pathTracerOutputUavDesc, "gOutput" );
+
+            // Create the UAV to the path tracer output.
+            D3D12_UNORDERED_ACCESS_VIEW_DESC debugInfoUavDesc = {};
+            debugInfoUavDesc.Format = DXGI_FORMAT_UNKNOWN;
+            debugInfoUavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            debugInfoUavDesc.Buffer.FirstElement = 0;
+            debugInfoUavDesc.Buffer.NumElements = 1;
+            debugInfoUavDesc.Buffer.StructureByteStride = sizeof( DebugInfo );
+            m_pCsuHeap->addUAV( m_debugInfoDefault.Get(), &debugInfoUavDesc, "gDebugInfo" );
 
             // Create the SRV to the path tracer output.
             D3D12_SHADER_RESOURCE_VIEW_DESC pathTracerOutputSrvDesc = {};
@@ -868,6 +951,7 @@ namespace rsmgpt
             pathTracerOutputSrvDesc.Texture2D.PlaneSlice = 0;
             pathTracerOutputSrvDesc.Texture2D.ResourceMinLODClamp = 0.f;
             m_pCsuHeap->addSRV( m_pathTracerOutput.Get(), &pathTracerOutputSrvDesc, "gptOutput" );
+
         }
 
         // Close the command list and execute it to begin the vertex buffer copy into
@@ -923,7 +1007,7 @@ namespace rsmgpt
         ComPtr<IDXGIFactory4> factory;
         ThrowIfFailed( CreateDXGIFactory1( IID_PPV_ARGS( &factory ) ) );
 
-        // TODO: Remove when done testing.
+        // NOTE: Uncomment to enable WARP.
         //m_useWarpDevice = true;
 
         if( m_useWarpDevice )
@@ -1039,13 +1123,20 @@ namespace rsmgpt
 
             //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
             {
-                ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
+                createBuffer(
+                    m_d3d12Device.Get(),
+                    m_timestampResultBuffer,
+                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
+                    D3D12_HEAP_FLAG_NONE,
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    resultBufferSize );
+                /*ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
                     &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
                     D3D12_HEAP_FLAG_NONE,
                     &CD3DX12_RESOURCE_DESC::Buffer( resultBufferSize ),
                     D3D12_RESOURCE_STATE_COPY_DEST,
                     nullptr,
-                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );
+                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );*/
 
                 ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
             }
@@ -1133,7 +1224,7 @@ namespace rsmgpt
                 RTVFormats.data()
                 );
             psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;   // Set the rasterizer state fill mode to wireframe.
-            //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // TODO: Remove when done testing.
+            //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // NOTE: Uncomment to disable back-face culling.
             ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_debugAccel3DPSO ) ) );
         }
 
@@ -1212,7 +1303,7 @@ namespace rsmgpt
         // Load the test model.
         {
             const path modelPath( "N:\\rsmgpt\\models\\test1.obj" );
-            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );
+            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get(), true ) );
         }
 
         // Close the command list and execute it to begin the vertex buffer copy into the default heap.
@@ -1270,12 +1361,16 @@ namespace rsmgpt
 
         // Update m_cbPerFrame.
         const auto camPos = m_pPTPersepectiveCamera->eyePosW();   // Storing that it can be used later when rendering it as text.
+        m_cbPerFrame.gWorld = m_modelWorldTransform.Transpose();
+        m_cbPerFrame.gWorldInvTrans = m_modelWorldTransform.Invert().Transpose().Transpose();   // TODO: Should be able to remove the two tranposes.
         m_cbPerFrame.gRasterToWorld = m_pPTPersepectiveCamera->rasterToWorld().Transpose();
         m_cbPerFrame.gCamPos = camPos;
-        m_cbPerFrame.gNumFaces = static_cast<unsigned>( m_pModel->numFaces() );
+        m_cbPerFrame.gNumFaces = static_cast<unsigned>( m_pModel->numPrimitives()/*numFaces()*/ );
+        m_cbPerFrame.gCursorPos[ 0 ] = m_cursorPos.x;
+        m_cbPerFrame.gCursorPos[ 1 ] = m_cursorPos.y;
         memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( PTCbPerFrame ) );   // This will be updated at runtime.
 
-                                                                                  // Set the compute pipeline bindings.
+        // Set the compute pipeline bindings.
         m_computeCommandList->SetComputeRootConstantBufferView( PTCbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
         m_computeCommandList->SetComputeRootDescriptorTable(
             PTComputeSrvTable,
@@ -1284,7 +1379,15 @@ namespace rsmgpt
             PTComputeUavTable,
             m_pCsuHeap->getGPUHandle( "gOutput" ) );    // Set the UAV table.
 
-                                                        // Dispatch enough thread groups to cover the entire screen.
+        // Transition the debug info resource from copy source state to unordered access.
+        D3D12_RESOURCE_BARRIER debugInfoBarrier =
+            CD3DX12_RESOURCE_BARRIER::Transition(
+                m_debugInfoDefault.Get(),
+                D3D12_RESOURCE_STATE_COPY_SOURCE,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS );
+        m_computeCommandList->ResourceBarrier( 1, &debugInfoBarrier );
+
+        // Dispatch enough thread groups to cover the entire screen.
         m_computeCommandList->Dispatch(
             m_width / ComputeBlockSize,
             m_height / ComputeBlockSize,
@@ -1299,6 +1402,15 @@ namespace rsmgpt
             2,
             m_timestampResultBuffer.Get(),
             timestampHeapIndex * sizeof( UINT64 ) );
+
+        // Transition the debug info resource from unordered access to generic read state.
+        debugInfoBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        debugInfoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        m_computeCommandList->ResourceBarrier( 1, &debugInfoBarrier );
+
+        // Copy the debug info from the default to the readback resource.
+        // TODO: This needs to happen on a separate copy queue.
+        m_computeCommandList->CopyResource( m_debugInfoReadback.Get(), m_debugInfoDefault.Get() );
 
         // Close the compute command list and execute the compute work.
         ThrowIfFailed( m_computeCommandList->Close() );
@@ -1353,7 +1465,7 @@ namespace rsmgpt
                 PTGfxSrvTable,
                 m_pCsuHeap->getGPUHandle( "gptOutput" ) ); // Set the UAV table.
 
-                                                           // Add a barrier indicating that the path tracer output is going to be used as an SRV.
+            // Add a barrier indicating that the path tracer output is going to be used as an SRV.
             D3D12_RESOURCE_BARRIER ptoBarrier =
                 CD3DX12_RESOURCE_BARRIER::Transition(
                     m_pathTracerOutput.Get(),
@@ -1365,8 +1477,10 @@ namespace rsmgpt
             m_commandList->DrawInstanced( 3, 1, 0, 0 );
 
             // Add a barrier reverting the path tracer output to the unordered access state for the next compute pass.
+            // and another barrier to indicate that the debug info is going to be read from.
             ptoBarrier.Transition.StateBefore = ptoBarrier.Transition.StateAfter;
             ptoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
             m_commandList->ResourceBarrier( 1, &ptoBarrier );
 
             // NOTE: Shouldn't do this since we're rendering text on top of this render target.
@@ -1376,7 +1490,6 @@ namespace rsmgpt
             //presentToRenderTargetBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
             //m_commandList->ResourceBarrier( 1, &presentToRenderTargetBarrier );  
 #endif // 0
-
 
             // Close the graphics command list.
             ThrowIfFailed( m_commandList->Close() );
@@ -1403,7 +1516,38 @@ namespace rsmgpt
                 std::to_wstring( camPos.z ) +
                 L")\nPath tracing time = " +
                 std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) +
-                L" ms";
+                L" ms\n" +
+                L"Dispatch thread ID: (" +
+                std::to_wstring( m_cursorPos.x ) +
+                L", " +
+                std::to_wstring( m_cursorPos.y ) +
+                L"); x pair = (" +
+                std::to_wstring( xGrid ) +
+                L", " +
+                std::to_wstring( xBlock ) +
+                L"); y pair = (" +
+                std::to_wstring( yGrid ) +
+                L", " +
+                std::to_wstring( yBlock ) +
+                L")\nHit ray origin = (" +
+                std::to_wstring( m_debugInfo.ray.o.x ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.o.y ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.o.z ) +
+                L"); Hit ray direction = (" +
+                std::to_wstring( m_debugInfo.ray.d.x ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.d.y ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.d.z ) +
+                L"); Hit primitive indices = (" + 
+                std::to_wstring( m_debugInfo.hitPrim.p0 ) +
+                L", " +
+                std::to_wstring( m_debugInfo.hitPrim.p1 ) +
+                L", " +
+                std::to_wstring( m_debugInfo.hitPrim.p2 ) +
+                L")";
             //static const WCHAR text[] = L"11On12";
 
             // Acquire our wrapped render target resource for the current back buffer.

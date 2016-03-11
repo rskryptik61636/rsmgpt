@@ -200,6 +200,55 @@ Bounds3f Primitive::WorldBound()
     return bbox;
 }
 
+bool Primitive::IntersectP( 
+    const std::vector<ModelVertex>& vertList, 
+    const Ray& ray, 
+    float& t,
+    float& b1,
+    float& b2,
+    const bool cullBackFacing /*= true*/ ) const
+{
+    // Compute the edge vectors for (v1 - v0) and (v2 - v0).
+    const Vec3 o = ray.o, d = ray.d, v0 = vertList[ p0 ].position, v1 = vertList[ p1 ].position, v2 = vertList[ p2 ].position;
+    const Vec3 e1 = v1 - v0, e2 = v2 - v0;
+
+    // Compute s1 = (d x e2).
+    const Vec3 s1 = d.Cross( e2 ); //cross( d, e2 );
+
+    // Compute the det = (e1.s1). Reject if < 0.
+    const float det = e1.Dot( s1 ); //dot( e1, s1 );
+    if( det < 0.000001f )
+    {
+        return false;
+    }
+
+    // Compute s = o - v0.
+    const Vec3 s = o - v0;
+
+    // Compute b1 = s1.s and return if < 0 or > det.
+    b1 = s1.Dot( s ); //dot( s1, s );
+    if( b1 < 0.f || b1 > det )
+    {
+        return false;
+    }
+
+    // Compute s2 = s x e1 and b2 = s2.d and return if < 0 or b1 + b2 > det.
+    const Vec3 s2 = s.Cross( e1 ); //cross( s, e1 );
+    b2 = s2.Dot( d ); //dot( s2, d );
+    if( b2 < 0.f || ( b1 + b2 ) > det )
+    {
+        return false;
+    }
+
+    // Compute t = s2.e2, scale the parameters by the inv of det and set the intersection to be true.
+    const float invDet = 1.f / det;
+    t = /*dot( s2, e2 )*/ s2.Dot( e2 ) * invDet;
+    b1 *= invDet;
+    b2 *= invDet;
+
+    return true;
+}
+
 bool Inside( const Point3 &p, const Bounds3f &b )
 {
     return ( p.x >= b.pMin.x && p.x <= b.pMax.x && p.y >= b.pMin.y &&
@@ -275,9 +324,15 @@ BVHAccel::BVHAccel(
     // Create a buffer resource for primitives.
     createBuffer(
         pDevice,
-        pCmdList,
         m_pPrimsBuffer,
+        &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
+        D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
+        D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
         primitives.size() * sizeof( Primitive ),
+        D3D12_RESOURCE_FLAG_NONE,
+        0,
+        nullptr,
+        pCmdList,
         m_pPrimsUpload,
         primitives.data() );
 
@@ -297,9 +352,15 @@ BVHAccel::BVHAccel(
     // Create a buffer resource for nodes.
     createBuffer(
         pDevice,
-        pCmdList,
         m_pNodesBuffer,
+        &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
+        D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
+        D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
         totalNodes * sizeof( LinearBVHNode ),
+        D3D12_RESOURCE_FLAG_NONE,
+        0,
+        nullptr,
+        pCmdList,
         m_pNodesUpload,
         nodes );
 }
@@ -786,11 +847,12 @@ bool BVHAccel::Intersect( const Ray &ray, SurfaceInteraction *isect ) const
     }
     return hit;
 }
+#endif // 0
 
-bool BVHAccel::IntersectP( const Ray &ray ) const
+bool BVHAccel::IntersectP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const
 {
     if( !nodes ) return false;
-    ProfilePhase p( Prof::AccelIntersectP );
+    //ProfilePhase p( Prof::AccelIntersectP );
     Vec3 invDir( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
     int dirIsNeg[ 3 ] = { invDir.x < 0, invDir.y < 0, invDir.z < 0 };
     int nodesToVisit[ 64 ];
@@ -805,9 +867,9 @@ bool BVHAccel::IntersectP( const Ray &ray ) const
             {
                 for( int i = 0; i < node->nPrimitives; ++i )
                 {
-                    if( primitives[ node->primitivesOffset + i ]->IntersectP(
-                        ray ) )
+                    if( primitives[ node->primitivesOffset + i ].IntersectP( vertexList, ray, t, b1, b2 ) )
                     {
+                        hitPrim = primitives[ node->primitivesOffset + i ];
                         return true;
                     }
                 }
@@ -837,7 +899,7 @@ bool BVHAccel::IntersectP( const Ray &ray ) const
     }
     return false;
 }
-#endif // 0
+
 
 
 BVHAccelPtr CreateBVHAccelerator(

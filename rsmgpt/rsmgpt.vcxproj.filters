@@ -103,5 +103,6 @@
   <ItemGroup>
     <None Include="..\src\rsmgptPathTracingCommon.hlsli" />
     <None Include="..\src\rsmgptBasicCommon.hlsli" />
+    <None Include="..\src\rsmgptLighting.hlsli" />
   </ItemGroup>
 </Project>

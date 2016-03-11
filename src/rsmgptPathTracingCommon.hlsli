@@ -40,6 +40,7 @@ struct Ray
     float3 o;   // Ray origin.
     float3 d;   // Ray direction.
     float tMax; // Ray max intersection parameter.
+    float time; // Unused for now, but will eventually be used for animation effects.
 };
 
 // Sphere structure.
@@ -83,6 +84,23 @@ float3 getBoundsPt( in Bounds bounds, in int indx )
         return bounds.pMax;
 }
 
+// Function which transforms a bounds.
+Bounds transformBounds( in Bounds bounds, in float4x4 trans )
+{
+    float3 p1 = mul( float4( bounds.pMin, 1.0f ), trans ).xyz;
+    float3 p2 = mul( float4( bounds.pMax, 1.0f ), trans ).xyz;
+    Bounds bbox = {
+        float3(
+            min( p1.x, p2.x ),
+            min( p1.y, p2.y ),
+            min( p1.z, p2.z ) ),
+        float3(
+            max( p1.x, p2.x ),
+            max( p1.y, p2.y ),
+            max( p1.z, p2.z ) ) };
+    return bbox;
+}
+
 // NOTE: Adapted from Primitive in bvh.h
 struct Primitive
 {
@@ -109,6 +127,13 @@ uint axis( in LinearBVHNode node )
 {
     return ( ( node.nPrimitivesAndAxis & 0x00ff0000 ) >> 16 );
 }
+
+// Debug info.
+struct DebugInfo
+{
+    Ray ray;
+    Primitive hitPrim;
+};
 
 #define MachineEpsilon 1e-10 * 0.5
 
@@ -248,7 +273,7 @@ bool triangleIntersectWithBackFaceCulling( in Ray ray, in Triangle tri, out floa
     return true;
 }
 
-bool triangleIntersectWithoutBackFaceCulling( in Ray ray, in Triangle tri, in bool cullBackFacing, out float t, out float b1, out float b2 )
+bool triangleIntersectWithoutBackFaceCulling( in Ray ray, in Triangle tri, out float t, out float b1, out float b2 )
 {
     // Compute the edge vectors for (v1 - v0) and (v2 - v0).
     const float3 o = ray.o, d = ray.d, v0 = tri.v0, v1 = tri.v1, v2 = tri.v2;
