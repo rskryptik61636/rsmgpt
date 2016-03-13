@@ -322,11 +322,9 @@ BVHAccel::BVHAccel(
     primitives.swap(orderedPrims);
 
     // Create a buffer resource for primitives.
-    createBuffer(
+    createCommittedDefaultBuffer(
         pDevice,
         m_pPrimsBuffer,
-        &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
-        D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
         D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
         primitives.size() * sizeof( Primitive ),
         D3D12_RESOURCE_FLAG_NONE,
@@ -350,11 +348,9 @@ BVHAccel::BVHAccel(
     assert(offset == totalNodes);
 
     // Create a buffer resource for nodes.
-    createBuffer(
+    createCommittedDefaultBuffer(
         pDevice,
         m_pNodesBuffer,
-        &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
-        D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
         D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
         totalNodes * sizeof( LinearBVHNode ),
         D3D12_RESOURCE_FLAG_NONE,

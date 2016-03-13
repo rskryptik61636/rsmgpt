@@ -30,6 +30,33 @@ namespace rsmgpt
     // NOTE: The reason pUpload is being passed in as a parameter instead of being created internally is because
     //       the resource needs to exist when the command list is executed and creating the resource internally
     //       would cause it be destroyed once the function exits its scope.
+    void createCommittedDefaultBuffer(
+        ID3D12Device* pDevice,
+        ComPtr<ID3D12Resource>& pResource,
+        D3D12_RESOURCE_STATES InitialResourceState,
+        const std::size_t dataSizeInBytes,
+        const D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE,
+        const UINT64 alignment = 0,
+        const D3D12_CLEAR_VALUE* pOptimizedClearValue = nullptr,
+        ID3D12GraphicsCommandList* pCommandList = nullptr,
+        ComPtr<ID3D12Resource>& pUpload = ComPtr<ID3D12Resource>(),
+        const void* pData = nullptr );
+
+    void createCommittedUploadBuffer(
+        ID3D12Device* pDevice,
+        ComPtr<ID3D12Resource>& pResource,
+        const std::size_t dataSizeInBytes,
+        const D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE,
+        const UINT64 alignment = 0 );
+
+    void createCommittedReadbackBuffer(
+        ID3D12Device* pDevice,
+        ComPtr<ID3D12Resource>& pResource,
+        const std::size_t dataSizeInBytes,
+        const D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE,
+        const UINT64 alignment = 0 );
+        
+#if 0
     void createBuffer(
         ID3D12Device* pDevice,
         ComPtr<ID3D12Resource>& pResource,
@@ -42,15 +69,6 @@ namespace rsmgpt
         const D3D12_CLEAR_VALUE *pOptimizedClearValue = nullptr,
         ID3D12GraphicsCommandList* pCommandList = nullptr,
         ComPtr<ID3D12Resource>& pUpload = ComPtr<ID3D12Resource>(),
-        const void* pData = nullptr
-        );
-
-#if 0
-    // Creates an upload buffer.
-    void createUploadBuffer(
-        ID3D12Device* pDevice,
-        ComPtr<ID3D12Resource>& pUpload,
-        const std::size_t dataSizeInBytes,
         const void* pData = nullptr
         );
 #endif // 0

@@ -153,11 +153,9 @@ namespace rsmgpt
 
         // Create the vertex buffer.
         const size_t vertexBufferSize = m_vertexList.size() * sizeof( ModelVertex );
-        createBuffer(
+        createCommittedDefaultBuffer(
             pDevice,
             m_pVertexBuffer,
-            &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
-            D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
             D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
             vertexBufferSize,
             D3D12_RESOURCE_FLAG_NONE,
@@ -176,11 +174,9 @@ namespace rsmgpt
         if( m_isDrawable )
         {
             const size_t indexBufferSize( m_indexList.size() * sizeof( unsigned int ) );
-            createBuffer(
+            createCommittedDefaultBuffer(
                 pDevice,
                 m_pIndexBuffer,
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
-                D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
                 D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
                 indexBufferSize,
                 D3D12_RESOURCE_FLAG_NONE,

@@ -33,12 +33,12 @@ namespace rsmgpt
         const D3D12_HEAP_FLAGS& HeapFlags,
         D3D12_RESOURCE_STATES InitialResourceState,
         const std::size_t dataSizeInBytes,
-        const D3D12_RESOURCE_FLAGS flags /*= D3D12_RESOURCE_FLAG_NONE*/,
-        const UINT64 alignment /*= 0*/,
-        const D3D12_CLEAR_VALUE *pOptimizedClearValue /*= nullptr*/,
-        ID3D12GraphicsCommandList* pCommandList /*= nullptr*/,
-        ComPtr<ID3D12Resource>& pUpload /*= ComPtr<ID3D12Resource>()*/,
-        const void* pData /*= nullptr*/
+        const D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE,
+        const UINT64 alignment = 0,
+        const D3D12_CLEAR_VALUE *pOptimizedClearValue = nullptr,
+        ID3D12GraphicsCommandList* pCommandList = nullptr,
+        ComPtr<ID3D12Resource>& pUpload = ComPtr<ID3D12Resource>(),
+        const void* pData = nullptr
         )
     {
         // Create a default usage resource for the buffer which will primarily reside on the GPU.
@@ -46,27 +46,21 @@ namespace rsmgpt
             pDevice->CreateCommittedResource(
                 pHeapProperties,
                 HeapFlags,
-                &CD3DX12_RESOURCE_DESC::Buffer( 
+                &CD3DX12_RESOURCE_DESC::Buffer(
                     dataSizeInBytes,
                     flags,
                     alignment ),     // Resource description. Buffer of 'dataSizeInBytes' bytes.
                 InitialResourceState,
                 pOptimizedClearValue,
-                //&CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
-                //D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
-                //&CD3DX12_RESOURCE_DESC::Buffer( dataSizeInBytes ),     // Resource description. Buffer of 'dataSizeInBytes' bytes.
-                //D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
-                //                                                        // -will be copied to it from the upload buffer.
-                //nullptr,                                                // No clear value.
                 IID_PPV_ARGS( &pResource ) ) );                    // Resource (output).
 
-        // Copy data to the intermediate upload heap and then schedule a copy
-        // from the upload heap to the buffer.
+                                                                   // Copy data to the intermediate upload heap and then schedule a copy
+                                                                   // from the upload heap to the buffer.
         if( pData != nullptr )
         {
             // Create an upload resource for the buffer which will primarily act as a staging buffer
             // to upload the data to the default usage buffer.
-            ThrowIfFailed( 
+            ThrowIfFailed(
                 pDevice->CreateCommittedResource(
                     &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ), // Upload heap.
                     D3D12_HEAP_FLAG_NONE,
@@ -82,45 +76,70 @@ namespace rsmgpt
 
             // Copy subresourceData to pResource via the staging resource pUpload.
             UpdateSubresources<1>( pCommandList, pResource.Get(), pUpload.Get(), 0, 0, 1, &subresourceData );
-        }        
-    }
-
-#if 0
-    // Creates an upload buffer.
-    void createUploadBuffer(
-        ID3D12Device* pDevice,
-        ComPtr<ID3D12Resource>& pUpload,
-        const std::size_t dataSizeInBytes,
-        const void* pData /*= nullptr*/
-        )
-    {
-        // Create an upload resource for the buffer which will primarily act as a staging buffer
-        // to upload the data to the default usage buffer.
-        ThrowIfFailed(
-            pDevice->CreateCommittedResource(
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ), // Upload heap.
-                D3D12_HEAP_FLAG_NONE,
-                &CD3DX12_RESOURCE_DESC::Buffer( dataSizeInBytes ),
-                D3D12_RESOURCE_STATE_GENERIC_READ,                  // The data will be read from this heap.
-                nullptr,
-                IID_PPV_ARGS( &pUpload ) ) );
-
-        D3D12_SUBRESOURCE_DATA subresourceData = {};
-        subresourceData.pData = pData;
-        subresourceData.RowPitch = dataSizeInBytes;
-        subresourceData.SlicePitch = subresourceData.RowPitch;
-
-        // Map pUpload and copy pData in.
-        if( pData != nullptr )
-        {
-            void* pDst = nullptr;
-            ThrowIfFailed( pUpload->Map( 0, NULL, &pDst ) );
-            memcpy_s( pDst, dataSizeInBytes, pData, dataSizeInBytes );
-            pUpload->Unmap( 0, NULL );
-            pDst = nullptr;
         }
     }
-#endif // 0
 
+    void createCommittedDefaultBuffer(
+        ID3D12Device* pDevice,
+        ComPtr<ID3D12Resource>& pResource,
+        D3D12_RESOURCE_STATES InitialResourceState,
+        const std::size_t dataSizeInBytes,
+        const D3D12_RESOURCE_FLAGS flags /*= D3D12_RESOURCE_FLAG_NONE*/,
+        const UINT64 alignment /*= 0*/,
+        const D3D12_CLEAR_VALUE *pOptimizedClearValue /*= nullptr*/,
+        ID3D12GraphicsCommandList* pCommandList /*= nullptr*/,
+        ComPtr<ID3D12Resource>& pUpload /*= ComPtr<ID3D12Resource>()*/,
+        const void* pData /*= nullptr*/ )
+    {
+        createBuffer(
+            pDevice,
+            pResource,
+            &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
+            D3D12_HEAP_FLAG_NONE,
+            InitialResourceState,                                   
+            dataSizeInBytes,
+            flags,
+            alignment,
+            pOptimizedClearValue,
+            pCommandList,
+            pUpload,
+            pData );
+    }
+
+    void createCommittedUploadBuffer(
+        ID3D12Device* pDevice,
+        ComPtr<ID3D12Resource>& pResource,
+        const std::size_t dataSizeInBytes,
+        const D3D12_RESOURCE_FLAGS flags /*= D3D12_RESOURCE_FLAG_NONE*/,
+        const UINT64 alignment /*= 0*/ )
+    {
+        createBuffer(
+            pDevice,
+            pResource,
+            &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),     // Upload usage heap property.
+            D3D12_HEAP_FLAG_NONE,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            dataSizeInBytes,
+            flags,
+            alignment );
+    }
+
+    void createCommittedReadbackBuffer(
+        ID3D12Device* pDevice,
+        ComPtr<ID3D12Resource>& pResource,
+        const std::size_t dataSizeInBytes,
+        const D3D12_RESOURCE_FLAGS flags /*= D3D12_RESOURCE_FLAG_NONE*/,
+        const UINT64 alignment /*= 0*/ )
+    {
+        createBuffer(
+            pDevice,
+            pResource,
+            &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),   // Readback usage heap property.
+            D3D12_HEAP_FLAG_NONE,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            dataSizeInBytes,
+            flags,
+            alignment );
+    }
 
 }   // end of namespace rsmgpt

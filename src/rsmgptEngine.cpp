@@ -313,6 +313,9 @@ namespace rsmgpt
     // Init state for path tracing mode.
     void Engine::initPathTracingMode()
     {
+
+#pragma region DeviceCreation
+
         // Enable the D3D12 debug layer if in debug mode.
         UINT d3d11DeviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
         D2D1_FACTORY_OPTIONS d2dFactoryOptions = {};
@@ -444,87 +447,9 @@ namespace rsmgpt
             dpiY
             );
 
-        // Create descriptor heaps.
-        {
-            m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, FrameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
-            m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
-            m_pCsuHeap.reset( new CsuDescriptorHeap( m_d3d12Device, PTCbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
-        }
+#pragma endregion DeviceCreation
 
-        // Create query heaps and result buffers.
-        {
-            // Two timestamps for each frame.
-            const UINT resultCount = 2 * FrameCount;
-            const UINT resultBufferSize = resultCount * sizeof( UINT64 );
-
-            D3D12_QUERY_HEAP_DESC timestampHeapDesc = {};
-            timestampHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-            timestampHeapDesc.Count = resultCount;
-
-            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
-            {
-                createBuffer(
-                    m_d3d12Device.Get(),
-                    m_timestampResultBuffer,
-                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
-                    D3D12_HEAP_FLAG_NONE,
-                    D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
-                    resultBufferSize );
-                /*ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
-                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
-                    D3D12_HEAP_FLAG_NONE,
-                    &CD3DX12_RESOURCE_DESC::Buffer( resultBufferSize ),
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    nullptr,
-                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );*/
-
-                ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
-            }
-        }
-
-        // Create frame resources.
-        {
-            // Create a RTV and command allocators for each frame.
-            for( UINT n = 0; n < FrameCount; n++ )
-            {
-                // Get the backing resource of the current swap chain buffer.
-                ThrowIfFailed( m_swapChain->GetBuffer( n, IID_PPV_ARGS( &m_renderTargets[ n ] ) ) );
-
-                // Create an RTV for the current back buffer.
-                m_pRtvHeap->addRTV(
-                    m_renderTargets[ n ].Get(),
-                    nullptr,
-                    "rtv" + std::to_string( n ) );
-
-                // Create a wrapped 11On12 resource of this back buffer. Since we are 
-                // rendering all D3D12 content first and then all D2D content, we specify 
-                // the In resource state as RENDER_TARGET - because D3D12 will have last 
-                // used it in this state - and the Out resource state as PRESENT. When 
-                // ReleaseWrappedResources() is called on the 11On12 device, the resource 
-                // will be transitioned to the PRESENT state.
-                D3D11_RESOURCE_FLAGS d3d11Flags = { D3D11_BIND_RENDER_TARGET };
-                ThrowIfFailed( m_d3d11On12Device->CreateWrappedResource(
-                    m_renderTargets[ n ].Get(),
-                    &d3d11Flags,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET,
-                    D3D12_RESOURCE_STATE_PRESENT,
-                    IID_PPV_ARGS( &m_wrappedBackBuffers[ n ] )
-                    ) );
-
-                // Create a render target for D2D to draw directly to this back buffer.
-                ComPtr<IDXGISurface> surface;
-                ThrowIfFailed( m_wrappedBackBuffers[ n ].As( &surface ) );
-                ThrowIfFailed( m_d2dDeviceContext->CreateBitmapFromDxgiSurface(
-                    surface.Get(),
-                    &bitmapProperties,
-                    &m_d2dRenderTargets[ n ]
-                    ) );
-
-                // Create graphics and compute command allocators for the current frame.
-                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &m_commandAllocators[ n ] ) ) );
-                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS( &m_computeCommandAllocators[ n ] ) ) );
-            }
-        }
+#pragma region RootSignaturesAndPipelineStates
 
         // Create the root signatures.
         {
@@ -609,6 +534,82 @@ namespace rsmgpt
             ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_pathTracingComputePSO ) ) );
         }
 
+#pragma endregion RootSignaturesAndPipelineStates
+
+#pragma region Resources
+
+        // Create descriptor heaps.
+        {
+            m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, FrameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
+            m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
+            m_pCsuHeap.reset( new CsuDescriptorHeap( m_d3d12Device, PTCbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
+        }
+
+        // Create query heaps and result buffers.
+        {
+            // Two timestamps for each frame.
+            const UINT resultCount = 2 * FrameCount;
+            const UINT resultBufferSize = resultCount * sizeof( UINT64 );
+
+            D3D12_QUERY_HEAP_DESC timestampHeapDesc = {};
+            timestampHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+            timestampHeapDesc.Count = resultCount;
+
+            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
+            {
+                createCommittedReadbackBuffer(
+                    m_d3d12Device.Get(),
+                    m_timestampResultBuffer,
+                    resultBufferSize );
+
+                ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
+            }
+        }
+
+        // Create frame resources.
+        {
+            // Create a RTV and command allocators for each frame.
+            for( UINT n = 0; n < FrameCount; n++ )
+            {
+                // Get the backing resource of the current swap chain buffer.
+                ThrowIfFailed( m_swapChain->GetBuffer( n, IID_PPV_ARGS( &m_renderTargets[ n ] ) ) );
+
+                // Create an RTV for the current back buffer.
+                m_pRtvHeap->addRTV(
+                    m_renderTargets[ n ].Get(),
+                    nullptr,
+                    "rtv" + std::to_string( n ) );
+
+                // Create a wrapped 11On12 resource of this back buffer. Since we are 
+                // rendering all D3D12 content first and then all D2D content, we specify 
+                // the In resource state as RENDER_TARGET - because D3D12 will have last 
+                // used it in this state - and the Out resource state as PRESENT. When 
+                // ReleaseWrappedResources() is called on the 11On12 device, the resource 
+                // will be transitioned to the PRESENT state.
+                D3D11_RESOURCE_FLAGS d3d11Flags = { D3D11_BIND_RENDER_TARGET };
+                ThrowIfFailed( m_d3d11On12Device->CreateWrappedResource(
+                    m_renderTargets[ n ].Get(),
+                    &d3d11Flags,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    D3D12_RESOURCE_STATE_PRESENT,
+                    IID_PPV_ARGS( &m_wrappedBackBuffers[ n ] )
+                    ) );
+
+                // Create a render target for D2D to draw directly to this back buffer.
+                ComPtr<IDXGISurface> surface;
+                ThrowIfFailed( m_wrappedBackBuffers[ n ].As( &surface ) );
+                ThrowIfFailed( m_d2dDeviceContext->CreateBitmapFromDxgiSurface(
+                    surface.Get(),
+                    &bitmapProperties,
+                    &m_d2dRenderTargets[ n ]
+                    ) );
+
+                // Create graphics and compute command allocators for the current frame.
+                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &m_commandAllocators[ n ] ) ) );
+                ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS( &m_computeCommandAllocators[ n ] ) ) );
+            }
+        }
+
         // Create the graphics and compute command lists.
         ThrowIfFailed(
             m_d3d12Device->CreateCommandList(
@@ -685,11 +686,9 @@ namespace rsmgpt
             const UINT vertexBufferSize = sizeof( triangleVertices );
 
             // Create the vertex buffer resource.
-            createBuffer(
+            createCommittedDefaultBuffer(
                 m_d3d12Device.Get(),
                 m_vertexBuffer,
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),    // Default usage heap property.
-                D3D12_HEAP_FLAG_NONE,                                   // Heap flags.
                 D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
                 vertexBufferSize,
                 D3D12_RESOURCE_FLAG_NONE,
@@ -754,22 +753,12 @@ namespace rsmgpt
             const UINT constantBufferDataSize = /*FrameCount **/ sizeof( PTCbPerFrame );
 
             // Create an upload heap for the constant buffer data.
-            createBuffer(
+            createCommittedUploadBuffer(
                 m_d3d12Device.Get(),
                 m_constantBuffer,
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),
-                D3D12_HEAP_FLAG_NONE,
-                D3D12_RESOURCE_STATE_GENERIC_READ,
                 constantBufferDataSize );
-            /*ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),
-                D3D12_HEAP_FLAG_NONE,
-                &CD3DX12_RESOURCE_DESC::Buffer( constantBufferDataSize ),
-                D3D12_RESOURCE_STATE_GENERIC_READ,
-                nullptr,
-                IID_PPV_ARGS( &m_constantBuffer ) ) );*/
 
-            // TODO: Testing out camera transforms. Remove when done testing.
+            // TODO: These parameters need to be read from a config file.
             const float
                 focalLength( 1.f ),
                 lensRadius( 1.f ),
@@ -868,25 +857,24 @@ namespace rsmgpt
 
         // Create the debug info default and readback resources.
         {
-            createBuffer(
+            createCommittedDefaultBuffer(
                 m_d3d12Device.Get(),
                 m_debugInfoDefault,
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
-                D3D12_HEAP_FLAG_NONE,
                 D3D12_RESOURCE_STATE_COPY_SOURCE,
                 sizeof( DebugInfo ),
                 D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS );
 
-            createBuffer(
+            createCommittedReadbackBuffer(
                 m_d3d12Device.Get(),
                 m_debugInfoReadback,
-                &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
-                D3D12_HEAP_FLAG_NONE,
-                D3D12_RESOURCE_STATE_COPY_DEST,
                 sizeof( DebugInfo ) );
         }
 
-        // Add all views to the descriptor heap.
+#pragma endregion Resources
+
+#pragma region Views
+        
+        // Create all views and add them to the descriptor heap.
         {
             // Get the GPU address of m_cbPerFrame.
             auto cbPerFrameGpuVA = m_constantBuffer->GetGPUVirtualAddress();
@@ -954,6 +942,10 @@ namespace rsmgpt
 
         }
 
+#pragma endregion Views
+
+#pragma region WrapUp
+
         // Close the command list and execute it to begin the vertex buffer copy into
         // the default heap.
         ThrowIfFailed( m_commandList->Close() );
@@ -978,6 +970,9 @@ namespace rsmgpt
             // complete before continuing.
             waitForGpu();
         }
+
+#pragma endregion WrapUp
+
     }
 
     // Init state for debug accel mode.
@@ -1121,22 +1116,11 @@ namespace rsmgpt
             timestampHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
             timestampHeapDesc.Count = resultCount;
 
-            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
             {
-                createBuffer(
+                createCommittedReadbackBuffer(
                     m_d3d12Device.Get(),
                     m_timestampResultBuffer,
-                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
-                    D3D12_HEAP_FLAG_NONE,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
                     resultBufferSize );
-                /*ThrowIfFailed( m_d3d12Device->CreateCommittedResource(
-                    &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_READBACK ),
-                    D3D12_HEAP_FLAG_NONE,
-                    &CD3DX12_RESOURCE_DESC::Buffer( resultBufferSize ),
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    nullptr,
-                    IID_PPV_ARGS( &m_timestampResultBuffer ) ) );*/
 
                 ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
             }
@@ -1484,11 +1468,11 @@ namespace rsmgpt
             m_commandList->ResourceBarrier( 1, &ptoBarrier );
 
             // NOTE: Shouldn't do this since we're rendering text on top of this render target.
-#if 0
+#if 1
             //// Indicate that the back buffer will now be used to present.
-            //presentToRenderTargetBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            //presentToRenderTargetBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-            //m_commandList->ResourceBarrier( 1, &presentToRenderTargetBarrier );  
+            rtBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            rtBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+            m_commandList->ResourceBarrier( 1, &rtBarrier );
 #endif // 0
 
             // Close the graphics command list.
@@ -1502,79 +1486,79 @@ namespace rsmgpt
             static_cast<UINT>( ppCommandLists.size() ),
             ppCommandLists.data() );
 
-        // Render the test text.
-        {
-            D2D1_SIZE_F rtSize = m_d2dRenderTargets[ m_frameIndex ]->GetSize();
-            /*D2D1_RECT_F textRect = D2D1::RectF( 0, 0, rtSize.width, rtSize.height );*/
-            D2D1_RECT_F textRect = D2D1::RectF( 0, 0, 900, 200 );
-            std::wstring text =
-                L"Camera position: (" +
-                std::to_wstring( camPos.x ) +
-                L", " +
-                std::to_wstring( camPos.y ) +
-                L", " +
-                std::to_wstring( camPos.z ) +
-                L")\nPath tracing time = " +
-                std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) +
-                L" ms\n" +
-                L"Dispatch thread ID: (" +
-                std::to_wstring( m_cursorPos.x ) +
-                L", " +
-                std::to_wstring( m_cursorPos.y ) +
-                L"); x pair = (" +
-                std::to_wstring( xGrid ) +
-                L", " +
-                std::to_wstring( xBlock ) +
-                L"); y pair = (" +
-                std::to_wstring( yGrid ) +
-                L", " +
-                std::to_wstring( yBlock ) +
-                L")\nHit ray origin = (" +
-                std::to_wstring( m_debugInfo.ray.o.x ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.o.y ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.o.z ) +
-                L"); Hit ray direction = (" +
-                std::to_wstring( m_debugInfo.ray.d.x ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.d.y ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.d.z ) +
-                L"); Hit primitive indices = (" + 
-                std::to_wstring( m_debugInfo.hitPrim.p0 ) +
-                L", " +
-                std::to_wstring( m_debugInfo.hitPrim.p1 ) +
-                L", " +
-                std::to_wstring( m_debugInfo.hitPrim.p2 ) +
-                L")";
-            //static const WCHAR text[] = L"11On12";
+        //// Render the test text.
+        //{
+        //    D2D1_SIZE_F rtSize = m_d2dRenderTargets[ m_frameIndex ]->GetSize();
+        //    /*D2D1_RECT_F textRect = D2D1::RectF( 0, 0, rtSize.width, rtSize.height );*/
+        //    D2D1_RECT_F textRect = D2D1::RectF( 0, 0, 900, 200 );
+        //    std::wstring text =
+        //        L"Camera position: (" +
+        //        std::to_wstring( camPos.x ) +
+        //        L", " +
+        //        std::to_wstring( camPos.y ) +
+        //        L", " +
+        //        std::to_wstring( camPos.z ) +
+        //        L")\nPath tracing time = " +
+        //        std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) +
+        //        L" ms\n" +
+        //        L"Dispatch thread ID: (" +
+        //        std::to_wstring( m_cursorPos.x ) +
+        //        L", " +
+        //        std::to_wstring( m_cursorPos.y ) +
+        //        L"); x pair = (" +
+        //        std::to_wstring( xGrid ) +
+        //        L", " +
+        //        std::to_wstring( xBlock ) +
+        //        L"); y pair = (" +
+        //        std::to_wstring( yGrid ) +
+        //        L", " +
+        //        std::to_wstring( yBlock ) +
+        //        L")\nHit ray origin = (" +
+        //        std::to_wstring( m_debugInfo.ray.o.x ) +
+        //        L", " +
+        //        std::to_wstring( m_debugInfo.ray.o.y ) +
+        //        L", " +
+        //        std::to_wstring( m_debugInfo.ray.o.z ) +
+        //        L"); Hit ray direction = (" +
+        //        std::to_wstring( m_debugInfo.ray.d.x ) +
+        //        L", " +
+        //        std::to_wstring( m_debugInfo.ray.d.y ) +
+        //        L", " +
+        //        std::to_wstring( m_debugInfo.ray.d.z ) +
+        //        L"); Hit primitive indices = (" + 
+        //        std::to_wstring( m_debugInfo.hitPrim.p0 ) +
+        //        L", " +
+        //        std::to_wstring( m_debugInfo.hitPrim.p1 ) +
+        //        L", " +
+        //        std::to_wstring( m_debugInfo.hitPrim.p2 ) +
+        //        L")";
+        //    //static const WCHAR text[] = L"11On12";
 
-            // Acquire our wrapped render target resource for the current back buffer.
-            m_d3d11On12Device->AcquireWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
+        //    // Acquire our wrapped render target resource for the current back buffer.
+        //    m_d3d11On12Device->AcquireWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
 
-            // Render text directly to the back buffer.
-            m_d2dDeviceContext->SetTarget( m_d2dRenderTargets[ m_frameIndex ].Get() );
-            m_d2dDeviceContext->BeginDraw();
-            m_d2dDeviceContext->SetTransform( D2D1::Matrix3x2F::Identity() );
-            m_d2dDeviceContext->DrawTextW(
-                text.c_str(),
-                static_cast<UINT32>( text.length() ),
-                //_countof( text ) - 1,
-                m_textFormat.Get(),
-                &textRect,
-                m_textBrush.Get()
-                );
-            ThrowIfFailed( m_d2dDeviceContext->EndDraw() );
+        //    // Render text directly to the back buffer.
+        //    m_d2dDeviceContext->SetTarget( m_d2dRenderTargets[ m_frameIndex ].Get() );
+        //    m_d2dDeviceContext->BeginDraw();
+        //    m_d2dDeviceContext->SetTransform( D2D1::Matrix3x2F::Identity() );
+        //    m_d2dDeviceContext->DrawTextW(
+        //        text.c_str(),
+        //        static_cast<UINT32>( text.length() ),
+        //        //_countof( text ) - 1,
+        //        m_textFormat.Get(),
+        //        &textRect,
+        //        m_textBrush.Get()
+        //        );
+        //    ThrowIfFailed( m_d2dDeviceContext->EndDraw() );
 
-            // Release our wrapped render target resource. Releasing 
-            // transitions the back buffer resource to the state specified
-            // as the OutState when the wrapped resource was created.
-            m_d3d11On12Device->ReleaseWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
+        //    // Release our wrapped render target resource. Releasing 
+        //    // transitions the back buffer resource to the state specified
+        //    // as the OutState when the wrapped resource was created.
+        //    m_d3d11On12Device->ReleaseWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
 
-            // Flush to submit the 11 command list to the shared command queue.
-            m_d3d11DeviceContext->Flush();
-        }
+        //    // Flush to submit the 11 command list to the shared command queue.
+        //    m_d3d11DeviceContext->Flush();
+        //}
 
         // Present the frame.
         ThrowIfFailed( m_swapChain->Present( 1, 0 ) );
