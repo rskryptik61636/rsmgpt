@@ -39,7 +39,7 @@
 
 #ifndef PBRT_CORE_MEMORY_H
 #define PBRT_CORE_MEMORY_H
-#include "stdafx.h"
+//#include "stdafx.h"
 
 // core/memory.h*
 //#include "pbrt.h"
@@ -112,7 +112,8 @@ class alignas(128) MemoryArena {
                 }
             }
             if (!currentBlock) {
-                currentAllocSize = (std::max)(nBytes, blockSize);
+                //currentAllocSize = (std::max)(nBytes, blockSize);
+                currentAllocSize = ( nBytes > blockSize ) ? nBytes : blockSize;
                 currentBlock = AllocAligned<uint8_t>(currentAllocSize);
             }
             currentBlockPos = 0;

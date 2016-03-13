@@ -20,7 +20,7 @@
 * THE SOFTWARE.
 ******************************************************************************/
 
-#include <stdafx.h>
+//#include <stdafx.h>
 #include <rsmgptEngine.h>
 
 using namespace rsmgpt;
@@ -55,8 +55,9 @@ using namespace rsmgpt;
 //CREATE_APPLICATION( Engine );
 
 //_Use_decl_annotations_
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR cmdLine, int nCmdShow)
 {
-	Engine pathTracer("", Engine::OM_PATH_TRACER/*OM_DEBUG_ACCEL*/);
+	Engine pathTracer(cmdLine, Engine::OM_PATH_TRACER/*OM_DEBUG_ACCEL*/);
     return pathTracer.Run( hInstance, nCmdShow );
+    //return 0;
 }

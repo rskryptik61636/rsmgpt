@@ -1,0 +1,28 @@
+// Cube Test scene config
+{
+	// Environment config
+	"project_root_dir" : "N:\\rsmgpt",
+	"models_dir" : "N:\\rsmgpt\\models",
+	
+    // Camera config
+    "camera" : {
+		"focal_length" : 1.0,
+		"lens_radius" : 1.0,
+		"field_of_view" : 45.0,		// Field of view in degrees
+		"near_plane" : 1.0,
+		"far_plane" : 1000.0,
+		"motion_factor" : 0.05,
+		"rotation_factor" : 0.05,
+		"eye" : [0, 0, -10],
+		"look_at" : [0, 0, 0],
+		"up" : [0, 1, 0]
+	},
+    
+    // Models
+    "models" : [
+		{
+			"name" : "cube",
+			"filename" : "test1.obj"
+		}        
+	]
+}

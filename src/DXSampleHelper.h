@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "rsmgptDefns.h"
+
 inline void ThrowIfFailed(HRESULT hr)
 {
 	if (FAILED(hr))

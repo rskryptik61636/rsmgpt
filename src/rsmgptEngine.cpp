@@ -21,6 +21,9 @@
 ******************************************************************************/
 
 #include "stdafx.h"
+
+#include <fstream>
+
 #include "rsmgptEngine.h"
 #include "rsmgptGlobals.h"
 #include "rsmgptResources.h"
@@ -46,6 +49,10 @@ namespace rsmgpt
         m_fenceValues{},
         m_frameIndex( 0 )
     {
+        // Load the scene config.
+        std::ifstream configStream( sceneFile, std::ifstream::in );
+        configStream >> m_configRoot;
+
         // Set the init and render methods based on the operation mode.
         switch( m_opMode )
         {
@@ -76,40 +83,36 @@ namespace rsmgpt
         break;
         }
 
-        // Set the shaders dir.
-        // TODO: Need a cleaner way of doing this.
-
-        // Read the value of the environment variable 'RSMGPT_ROOT'.
+        // NOTE: Keeping around as a reference.
+#if 0
+                        // Read the value of the environment variable 'RSMGPT_ROOT'.
         // Example code here: http://stackoverflow.com/questions/15916695/can-anyone-give-me-example-code-of-dupenv-s
-        char* buf = nullptr;
+        /*char* buf = nullptr;
         size_t sz = 0;
-        if( _dupenv_s( &buf, &sz, "RSMGPT_ROOT" ) == 0 && buf != nullptr )
+        if( _dupenv_s( &buf, &sz, "RSMGPT_ROOT" ) == 0 && buf != nullptr )*/
+#endif // 0
+
+        // Set the shaders dir.
         {
+            const std::string rootDir = m_configRoot[ "project_root_dir" ].asString();
 
 #ifdef _WIN64
 
 #ifdef _DEBUG
-            m_shadersDir = path( buf ) / path( "lib\\x64\\Debug" );
+            m_shadersDir = path( rootDir ) / path( "lib\\x64\\Debug" );
 #else   // NDEBUG
-            m_shadersDir = path( buf ) / path( "lib\\x64\\Release" );
+            m_shadersDir = path( rootDir ) / path( "lib\\x64\\Release" );
 #endif  // _DEBUG
 
 #else   // x86
 
 #ifdef _DEBUG
-            m_shadersDir = path( buf ) / path( "lib\\x86\\Debug" );
+            m_shadersDir = path( rootDir ) / path( "lib\\x86\\Debug" );
 #else   // NDEBUG
-            m_shadersDir = path( buf ) / path( "lib\\x86\\Release" );
+            m_shadersDir = path( rootDir ) / path( "lib\\x86\\Release" );
 #endif  // _DEBUG
 
 #endif  // _WIN64
-
-            free( buf );
-            buf = nullptr;
-        }
-        else
-        {
-            throw;  // TODO: Is there a better way to handle this.
         }
 
         // Setup the viewport.
@@ -275,8 +278,6 @@ namespace rsmgpt
 
         // Wait until the fence has been processed.
         WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
-        /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
-        WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
 
         // Increment the fence value for the current frame.
         m_fenceValues[ m_frameIndex ]++;
@@ -302,8 +303,6 @@ namespace rsmgpt
         if( completedValue < m_fenceValues[ m_frameIndex ] )
         {
             WaitForFenceOnCPU( m_fence.Get(), m_fenceValues[ m_frameIndex ], m_fenceEvent );
-            /*ThrowIfFailed( m_fence->SetEventOnCompletion( m_fenceValues[ m_frameIndex ], m_fenceEvent ) );
-            WaitForSingleObjectEx( m_fenceEvent, INFINITE, FALSE );*/
         }
 
         // Set the fence value for the next frame.
@@ -758,23 +757,36 @@ namespace rsmgpt
                 m_constantBuffer,
                 constantBufferDataSize );
 
-            // TODO: These parameters need to be read from a config file.
+            // Read the camera parameters from the scene config.
+            const auto& cameraConfig = m_configRoot[ "camera" ];
             const float
-                focalLength( 1.f ),
-                lensRadius( 1.f ),
+                focalLength( cameraConfig[ "focal_length" ].asFloat() ),
+                lensRadius( cameraConfig[ "lens_radius" ].asFloat() ),
                 fWidth( static_cast<float>( m_width ) ),
                 fHeight( static_cast<float>( m_height ) ),
-                fov( .25f * XM_PI ),
+                fov( cameraConfig[ "field_of_view" ].asFloat() / 180.f * XM_PI ),
                 aspectRatio( fWidth / fHeight ),
-                nearPlane( 1.f ),
-                farPlane( 1000.f ),
-                motionFactor( isSpider ? .75f : .05f ),
-                rotationFactor( .05f ),
+                nearPlane( cameraConfig[ "near_plane" ].asFloat() ),
+                farPlane( cameraConfig[ "far_plane" ].asFloat()  ),
+                motionFactor( cameraConfig[ "motion_factor" ].asFloat() ),
+                rotationFactor( cameraConfig[ "rotation_factor" ].asFloat() ),
                 screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
                 screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
-            const Vec3 eye( 0, 0, isSpider ? -250 : -10 ), lookAt( 0, 0, farPlane ), up( 0, 1, 0 );
+            const Vec3 
+                eye( 
+                    cameraConfig[ "eye" ][ 0 ].asFloat(),
+                    cameraConfig[ "eye" ][ 1 ].asFloat(),
+                    cameraConfig[ "eye" ][ 2 ].asFloat() ),
+                lookAt( 
+                    cameraConfig[ "look_at" ][ 0 ].asFloat(),
+                    cameraConfig[ "look_at" ][ 1 ].asFloat(),
+                    cameraConfig[ "look_at" ][ 2 ].asFloat() ), 
+                up( 
+                    cameraConfig[ "up" ][ 0 ].asFloat(), 
+                    cameraConfig[ "up" ][ 1 ].asFloat(), 
+                    cameraConfig[ "up" ][ 2 ].asFloat() );
             m_pPTPersepectiveCamera.reset(
                 new PTPerspectiveCamera(
                     eye,
@@ -799,9 +811,12 @@ namespace rsmgpt
 
         // Load the test model.
         {
+            const auto& modelsConfig = m_configRoot[ "models" ];
             m_modelWorldTransform = /*isSpider ? Mat4::CreateRotationY( -0.5 * XM_PI ) :*/ Mat4::Identity;
             
-            const path modelPath( isSpider ? "N:\\rsmgpt\\models\\spider.obj" : "N:\\rsmgpt\\models\\test1.obj" );
+            const path 
+                modelsRoot( m_configRoot[ "models_dir" ].asString() ),
+                modelPath( modelsRoot / path( modelsConfig[0]["filename"].asString() ) );
             m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );            
         }
 

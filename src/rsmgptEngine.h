@@ -28,6 +28,8 @@
 #include "rsmgptCamera.h"
 #include "rsmgptModel.h"
 
+#include <json/json.h>
+
 #include <functional>
 
 #if 0
@@ -85,6 +87,9 @@ namespace rsmgpt {
         // Engine constants.
         static const UINT FrameCount = 2;   // TODO: Rename to m_FrameCount once we've got whatever code we need from the D3D12 samples.
         static const UINT ComputeBlockSize = 16;
+
+        // Config file root node.
+        Json::Value m_configRoot;
 
         // Operation mode and associated function pointers.
         OperationMode m_opMode;
