@@ -54,7 +54,14 @@ public:
             aiProcessPreset_TargetRealtime_Quality );
 
     // Draws the model.
-    void draw( const Mat4& viewProj, const UINT rootParameterIndex, const UINT rootParameterRegisterSpace, ID3D12GraphicsCommandList* pCmdList );
+    void draw( 
+        const Mat4& viewProj, 
+        const UINT rootParameterIndex, 
+        const UINT rootParameterRegisterSpace, 
+        ID3D12GraphicsCommandList* pCmdList );
+
+    // Releases the upload buffers. Note that this should only be invoked once the command list performing the upload has finished executing.
+    void releaseUploadBuffers();
 
     // Accessor function for the model's root node. Required to traverse the node tree in order to draw the model.
     const ModelNode& rootNode() const { return m_rootNode; }

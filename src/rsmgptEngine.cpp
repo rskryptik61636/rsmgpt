@@ -953,23 +953,24 @@ namespace rsmgpt
         m_commandQueue->ExecuteCommandLists( static_cast<UINT>( ppCommandLists.size() ), ppCommandLists.data() );
 
         // Create synchronization objects and wait until assets have been uploaded to the GPU.
+        ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_fence ) ) );
+        ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_computeFence ) ) );
+        m_fenceValues[ m_frameIndex ]++;
+
+        // Create an event handle to use for frame synchronization.
+        m_fenceEvent = CreateEventEx( nullptr, FALSE, FALSE, EVENT_ALL_ACCESS );
+        if( m_fenceEvent == nullptr )
         {
-            ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_fence ) ) );
-            ThrowIfFailed( m_d3d12Device->CreateFence( m_fenceValues[ m_frameIndex ], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &m_computeFence ) ) );
-            m_fenceValues[ m_frameIndex ]++;
-
-            // Create an event handle to use for frame synchronization.
-            m_fenceEvent = CreateEventEx( nullptr, FALSE, FALSE, EVENT_ALL_ACCESS );
-            if( m_fenceEvent == nullptr )
-            {
-                ThrowIfFailed( HRESULT_FROM_WIN32( GetLastError() ) );
-            }
-
-            // Wait for the command list to execute; we are reusing the same command 
-            // list in our main loop but for now, we just want to wait for setup to 
-            // complete before continuing.
-            waitForGpu();
+            ThrowIfFailed( HRESULT_FROM_WIN32( GetLastError() ) );
         }
+
+        // Wait for the command list to execute; we are reusing the same command 
+        // list in our main loop but for now, we just want to wait for setup to 
+        // complete before continuing.
+        waitForGpu();
+
+        // Release the model's upload buffers.
+        m_pModel->releaseUploadBuffers();
 
 #pragma endregion WrapUp
 

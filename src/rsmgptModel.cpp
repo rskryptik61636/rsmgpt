@@ -384,4 +384,10 @@ namespace rsmgpt
         // Pop the current node's transformation from the stack.
         transStack.pop_back();
     }    
+
+    void Model::releaseUploadBuffers()
+    {
+        m_pVertexUploadBuffer.Reset();
+        m_pIndexUploadBuffer.Reset();
+    }
 }
