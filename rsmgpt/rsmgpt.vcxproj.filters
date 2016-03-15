@@ -83,7 +83,9 @@
     <ClCompile Include="..\src\rsmgptResources.cpp">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\jsoncpp.cpp" />
+    <ClCompile Include="..\src\jsoncpp.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="..\src\rsmgptBasicPS.hlsl">
