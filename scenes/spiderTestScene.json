@@ -24,5 +24,15 @@
 			"name"		: "spider",
 			"filename"	: "spider.obj"
 		}        
-	]
+	],
+
+	// Text parameters.
+	"text" : {
+		"font"				: "Verdana",
+		"size"				: 25,
+		"text_box_left"		: 0,
+		"text_box_right"	: 900,
+		"text_box_top"		: 0,
+		"text_box_bottom"	: 200
+	}
 }
