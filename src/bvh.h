@@ -322,14 +322,15 @@ struct Primitive
         float& b2,
         const bool cullBackFacing = true ) const;
 };
-//typedef std::shared_ptr<Primitive> PrimitivePtr;
-typedef std::vector<Primitive/*Ptr*/> PrimitiveList;
+typedef std::vector<Primitive> PrimitiveList;
 
 // Debug info.
 struct DebugInfo
 {
     Ray ray;
     Primitive hitPrim;
+    UINT nTraversedBounds;
+    UINT nTotalPrimIntersections;
 };
 
 // BVHAccel Declarations
