@@ -133,6 +133,8 @@ struct DebugInfo
 {
     Ray ray;
     Primitive hitPrim;
+    uint nTraversedBounds;
+    uint nTotalPrimIntersections;
 };
 
 #define MachineEpsilon 1e-10 * 0.5

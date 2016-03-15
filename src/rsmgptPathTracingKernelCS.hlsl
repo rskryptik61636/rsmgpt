@@ -30,7 +30,8 @@ cbuffer cbPerFrame : register( b0 )
     float4x4    gWorldInvTranspose;    // Model world space transform inverse tranpose (for the triangle's surface normal).
     float4x4    gRasterToWorld;        // Raster to world space transform.
     float3      gCamPos;               // Camera position.
-    uint        gNumFaces;             // No. of triangle faces in the model.
+    //uint        gNumFaces;             // No. of triangle faces in the model.
+    bool        gGetDebugInfo;         // Specifies whether debug info needs to be populated or not.
     int2        gCursorPos;            // Cursor pos.
 }
 
@@ -61,6 +62,7 @@ static const Material M = {
 static const float4 AColor = float4( 0.0f, 0.0f, 1.0f, 1.0f );  // Ambient blue colour.
 static const float3 L = float3( 0.0f, 1.0f, 0.0f );           // Directional light (reverse direction for shading purposes).
 
+#if 0
 bool primHitManual( in Ray ray, out float t, out float b1, out float b2, inout float4 color )
 {
     for( uint i = 0; i < gNumFaces; ++i )
@@ -100,22 +102,44 @@ bool primHitManual( in Ray ray, out float t, out float b1, out float b2, inout f
 
     return false;
 }
+#endif // 0
  
 // NOTE: Adapted from BVHAccel's IntersectP method in bvh.cpp.
-bool primHit( in Ray ray, in uint3 dispatchThreadId, out float t, out float b1, out float b2, inout float4 color )
+bool primHit( in Ray ray, in uint3 dispatchThreadId, inout float4 color )
 {
     float3 invDir = float3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
     int3 dirIsNeg = int3( invDir.x < 0, invDir.y < 0, invDir.z < 0 );
     int nodesToVisit[ /*64*/ 32 ];   // NOTE: Reducing nodesToVisit to reduce temp register requirements.
     int toVisitOffset = 0, currentNodeIndex = 0;
 
+    float t, b1, b2;
     float tMin = tMax, b1Hit, b2Hit;
-    Primitive hitPrim;
+    uint hitPrimIndx, junk;
+
+    // Initialize the debug info's nTotalPrimIntersections to 0.
+    if( gGetDebugInfo && dispatchThreadId.x == 0 && dispatchThreadId.y == 0 )
+    {
+        InterlockedExchange( gDebugInfo[ 0 ].nTotalPrimIntersections, 0, junk );
+    }
+
+    // Initialize the debug info's nTraversedBounds to 0.
+    bool isDebugThread = ( gGetDebugInfo && dispatchThreadId.x == gCursorPos.x && dispatchThreadId.y == gCursorPos.y );
+    if( isDebugThread )
+    {
+        gDebugInfo[ 0 ].nTraversedBounds = 0;
+    }
+    
     while( true )
     {
         Bounds bbox = transformBounds( gBVHNodes[ currentNodeIndex ].bounds, gWorld );
         if( boxIntersect( ray, bbox, invDir, dirIsNeg ) )
         {
+            // Increment the debug info's nTraversedBounds.
+            if( isDebugThread )
+            {
+                ++gDebugInfo[ 0 ].nTraversedBounds;
+            }
+            
             // Process BVH node _node_ for traversal
             uint nPrims = nPrimitives( gBVHNodes[ currentNodeIndex ] );
             if( nPrims > 0 )
@@ -130,15 +154,20 @@ bool primHit( in Ray ray, in uint3 dispatchThreadId, out float t, out float b1, 
                         mul( float4( gVertexBuffer[ prim.p2 ].position, 1.0 ), gWorld ).xyz };
                     if( triangleIntersectWithBackFaceCulling( ray, tri, t, b1, b2 ) )
                     {
+                        // Increment the debug info's nTotalPrimIntersections.
+                        if( gGetDebugInfo )
+                        {
+                            InterlockedAdd( gDebugInfo[ 0 ].nTotalPrimIntersections, 1 );
+                        }
+                        
                         // Set tMin to t if it is lesser. This is to ensure that the closest primitive is hit.
                         if( t < tMin )
                         {
                             tMin = t;
-                            hitPrim = prim;
+                            hitPrimIndx = gBVHNodes[ currentNodeIndex ].primitivesOrSecondChildOffset + i;
                             b1Hit = b1;
                             b2Hit = b2;
-                        }
-                        //return true;
+                        }                        
                     }
                 }
                 if( toVisitOffset == 0 ) break;
@@ -170,13 +199,13 @@ bool primHit( in Ray ray, in uint3 dispatchThreadId, out float t, out float b1, 
     if( tMin < tMax )
     {
         // Triangle's colour.
-        float4 LColor = gVertexBuffer[ hitPrim.p0 ].color;
+        float4 LColor = gVertexBuffer[ gPrimitives[ hitPrimIndx ].p0 ].color;
 
         // Triangle's transformed surface normal.
         float3 N =
-            b1Hit * gVertexBuffer[ hitPrim.p0 ].normal +
-            b2Hit * gVertexBuffer[ hitPrim.p1 ].normal +
-            ( 1 - b1Hit - b2Hit ) * gVertexBuffer[ hitPrim.p2 ].normal;
+            b1Hit * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p0 ].normal +
+            b2Hit * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p1 ].normal +
+            ( 1 - b1Hit - b2Hit ) * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p2 ].normal;
         N = mul( N, ( float3x3 )gWorldInvTranspose );
 
         // Half-way vector.
@@ -191,11 +220,11 @@ bool primHit( in Ray ray, in uint3 dispatchThreadId, out float t, out float b1, 
         //    color = float4( 1, 0, 0, 1 );
         //}
 
-        if( dispatchThreadId.x == gCursorPos.x && dispatchThreadId.y == gCursorPos.y )
+        if( isDebugThread )
         {
             // Populate gDebugInfo if the current thread ID corresponds to the cursor pos.
             gDebugInfo[ 0 ].ray = ray;
-            gDebugInfo[ 0 ].hitPrim = hitPrim;
+            gDebugInfo[ 0 ].hitPrim = gPrimitives[ hitPrimIndx ];
 
             // Set the pixel colour to red.
             color = float4( 1, 0, 0, 1 );
@@ -230,20 +259,10 @@ void main(
     Ray ray = { gCamPos, rayDir, tMax, rayTime };
 
     // Iterate over the model's BVH tree and check if any primitives are hit by the current ray.
-    float t, b1, b2;
+    //float t, b1, b2;
     float4 triColor = float4( 0, 0, 0, 1 );
-    bool hit = primHit( ray, dispatchThreadId, t, b1, b2, triColor );
+    bool hit = primHit( ray, dispatchThreadId, triColor );
     gOutput[ dispatchThreadId.xy ] = triColor;
-
-    //// Show the cursor pos in red.
-    //if( dispatchThreadId.x == gCursorPos.x && dispatchThreadId.y == gCursorPos.y )
-    //{
-    //    gOutput[ dispatchThreadId.xy ] = float4( 1, 0, 0, 1 );
-    //}
-    //else
-    //{
-    //    gOutput[ dispatchThreadId.xy ] = triColor;        
-    //}    
 }
 
 // NOTE: Hardcoding first sphere intersection params, will be removed when the intersection code is proven to work.

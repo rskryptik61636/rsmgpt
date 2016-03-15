@@ -32,13 +32,8 @@
 
 #include <functional>
 
-#if 0
-#include <GameCore.h>
-#include <GraphicsCore.h>
-#include <CommandContext.h>
-#include <SamplerManager.h>
-#include <BufferManager.h>  
-#endif // 0
+// Define this to generate debug info which can be read back from the path tracing shader.
+//#define GENERATE_DEBUG_INFO
 
 namespace rsmgpt {
 	
@@ -85,8 +80,8 @@ namespace rsmgpt {
         void renderDebugAccelMode();
 
         // Engine constants.
-        static const UINT FrameCount = 2;   // TODO: Rename to m_FrameCount once we've got whatever code we need from the D3D12 samples.
-        static const UINT ComputeBlockSize = 16;
+        static const UINT m_frameCount = 2;
+        static const UINT m_computeBlockSize = 16;
 
         // Config file root node.
         Json::Value m_configRoot;
@@ -109,10 +104,10 @@ namespace rsmgpt {
             Mat4        gWorldInvTrans; // World space transformation matrix inverse transpose (for the triangle's surface normal).
             Mat4        gRasterToWorld; // Raster to world space transformation matrix.
             Vec3        gCamPos;        // Camera position.
-            unsigned    gNumFaces;      // No. of triangle faces.
+            BOOL        gGetDebugInfo;  // Specifies whether debug info needs to be populated or not.
             int         gCursorPos[2];  // Cursor position.
 
-            byte        pad[ 2 * 256 - ( 3 * sizeof( Mat4 ) + sizeof( Vec3 ) + sizeof( unsigned ) + 2 * sizeof( int ) ) ];      // Constant buffers are 256 byte aligned.
+            byte        pad2[ 2 * 256 - ( 3 * sizeof( Mat4 ) + sizeof( Vec3 ) + sizeof( unsigned ) + 2 * sizeof( int ) ) ];      // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
         // Path tracing mode graphics root signature parameter offsets.
@@ -153,8 +148,11 @@ namespace rsmgpt {
         POINT m_cursorPos;
         UINT xGrid, yGrid, xBlock, yBlock;
 
+#ifdef GENERATE_DEBUG_INFO
         // Debug info.
         DebugInfo m_debugInfo;
+#endif // GENERATE_DEBUG_INFO
+
 
         // Each triangle gets its own constant buffer per frame.
         std::vector<PTCbPerFrame> m_constantBufferData;
@@ -173,11 +171,11 @@ namespace rsmgpt {
         ComPtr<ID2D1Factory3> m_d2dFactory;
         ComPtr<ID2D1Device2> m_d2dDevice;
         ComPtr<ID2D1DeviceContext2> m_d2dDeviceContext;
-        ComPtr<ID3D12Resource> m_renderTargets[ FrameCount ];
-        ComPtr<ID3D11Resource> m_wrappedBackBuffers[ FrameCount ];
-        ComPtr<ID2D1Bitmap1> m_d2dRenderTargets[ FrameCount ];
-        ComPtr<ID3D12CommandAllocator> m_commandAllocators[ FrameCount ];
-        ComPtr<ID3D12CommandAllocator> m_computeCommandAllocators[ FrameCount ];
+        ComPtr<ID3D12Resource> m_renderTargets[ m_frameCount ];
+        ComPtr<ID3D11Resource> m_wrappedBackBuffers[ m_frameCount ];
+        ComPtr<ID2D1Bitmap1> m_d2dRenderTargets[ m_frameCount ];
+        ComPtr<ID3D12CommandAllocator> m_commandAllocators[ m_frameCount ];
+        ComPtr<ID3D12CommandAllocator> m_computeCommandAllocators[ m_frameCount ];
         ComPtr<ID3D12CommandQueue> m_commandQueue;
         ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
         RootSignature m_gfxRootSignature;
@@ -192,7 +190,7 @@ namespace rsmgpt {
         // Synchronization objects.
         ComPtr<ID3D12Fence> m_fence;
         ComPtr<ID3D12Fence> m_computeFence;
-        UINT64 m_fenceValues[ FrameCount ];
+        UINT64 m_fenceValues[ m_frameCount ];
         HANDLE m_fenceEvent;
 
         // Asset objects.
