@@ -20,44 +20,31 @@
 * THE SOFTWARE.
 ******************************************************************************/
 
-//#include <stdafx.h>
-#include <rsmgptEngine.h>
+#include "rsmgptBasicCommon.hlsli"
 
-using namespace rsmgpt;
-
-#pragma message("Linking against rsmgpt.lib")
-#pragma comment(lib, "rsmgpt.lib")
-
-#pragma message("Linking against DirectXTK.lib")
-#pragma comment(lib, "DirectXTK.lib")
-
-#ifdef _DEBUG
-
-#pragma message("Linking against assimp-vc130-mtd.lib")
-#pragma comment(lib, "assimp-vc130-mtd.lib")
-
-#else
-
-#pragma message("Linking against assimp-vc130-mt.lib")
-#pragma comment(lib, "assimp-vc130-mt.lib")
-
-#endif  // _DEBUG
-
-#if 0
-#pragma message("Linking against Core.lib")
-#pragma comment(lib, "Core.lib")
-
-#pragma message("Linking against ZLib.lib")
-#pragma comment(lib, "ZLib.lib")  
-#endif // 0
-
-
-//CREATE_APPLICATION( Engine );
-
-//_Use_decl_annotations_
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR cmdLine, int nCmdShow)
+// Bounds points and world transform.
+cbuffer DebugBounds : register( b0 )
 {
-	Engine pathTracer(cmdLine, Engine::/*OM_PATH_TRACER*/OM_DEBUG_ACCEL);
-    return pathTracer.Run( hInstance, nCmdShow );
-    //return 0;
+    float3 pMin;
+    float3 pMax;
+    float4x4 gVP;
+}
+
+[maxvertexcount(8)]
+void main(
+	point BBOX_VS_OUT input[1], 
+	inout LineStream< BBOX_PS_IN > output
+)
+{
+	// To begin with, append the pMin/pMax of gBounds.
+    BBOX_PS_IN vOut;
+    float4 vMin = mul( float4( pMin.x, pMin.y, pMin.z, 1.f ), gVP );
+    vOut.position = vMin;
+    output.Append( vOut );
+
+    float4 vMax = mul( float4( pMax.x, pMax.y, pMax.z, 1.f ), gVP );
+    vOut.position = vMax;
+    output.Append( vOut );
+
+    output.RestartStrip();
 }

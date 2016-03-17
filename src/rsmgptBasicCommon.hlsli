@@ -21,7 +21,7 @@
 ******************************************************************************/
 
 // Basic VS input struct.
-struct VS_IN
+struct BASIC_VS_IN
 {
     float3 position     : POSITION;
     float3 normal       : NORMAL;
@@ -32,7 +32,7 @@ struct VS_IN
 };
 
 // Basic PS input struct.
-struct PS_IN
+struct BASIC_PS_IN
 {
     float4 position     : SV_POSITION;
     float3 normal       : NORMAL;
@@ -40,4 +40,16 @@ struct PS_IN
     float3 tangent      : TANGENT;
     float3 binormal     : BINORMAL;
     float4 color        : COLOR;
+};
+
+// Bbox VS output struct.
+struct BBOX_VS_OUT
+{
+    float4 position     : POSITION;
+};
+
+// Bbox PS input struct.
+struct BBOX_PS_IN
+{
+    float4 position     : SV_POSITION;
 };

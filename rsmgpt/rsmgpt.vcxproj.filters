@@ -103,6 +103,15 @@
     <FxCompile Include="..\src\rsmgptPathTracingOutputVS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
+    <FxCompile Include="..\src\rsmgptBoundsVS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\src\rsmgptBoundsGS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="..\src\rsmgptBoundsPS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\src\rsmgptBasicCommon.hlsli">

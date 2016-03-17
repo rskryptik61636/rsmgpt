@@ -28,9 +28,9 @@ cbuffer BasicTrans : register( b0, space0 )
     float4x4 gWVP;  // World-view-projection transformation matrix.
 }
 
-PS_IN main( VS_IN vIn )
+BASIC_PS_IN main( BASIC_VS_IN vIn )
 {
-    PS_IN vOut;
+    BASIC_PS_IN vOut;
 
     // Transform the input position by the world-view-projection matrix.
     vOut.position = mul( float4( vIn.position, 1.0f ), gWVP );

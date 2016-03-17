@@ -107,7 +107,7 @@ namespace rsmgpt {
             BOOL        gGetDebugInfo;  // Specifies whether debug info needs to be populated or not.
             int         gCursorPos[2];  // Cursor position.
 
-            byte        pad2[ 2 * 256 - ( 3 * sizeof( Mat4 ) + sizeof( Vec3 ) + sizeof( unsigned ) + 2 * sizeof( int ) ) ];      // Constant buffers are 256 byte aligned.
+            byte        pad[ 2 * 256 - ( 3 * sizeof( Mat4 ) + sizeof( Vec3 ) + sizeof( BOOL ) + 2 * sizeof( int ) ) ];      // Constant buffers are 256 byte aligned.
         } m_cbPerFrame;
 
         // Path tracing mode graphics root signature parameter offsets.
@@ -142,6 +142,23 @@ namespace rsmgpt {
             DebugGfxVSBasicTrans,                        // Debug VS BasicTrans constant buffer which is bound to bind slot 0 and register space 0.
             DebugGfxPSBasicOutput,                       // Debug PS BasicOutput constant buffer which is bound to bind slot 0 and register space 1.
             DebugGfxRootParametersCount
+        };
+
+        struct DebugBounds
+        {
+            Vec3 pMin;
+            UINT pad1;
+
+            Vec3 pMax;
+            UINT pad2;
+            
+            Mat4 viewProj;
+        };
+
+        enum DebugBoundsRootParameters
+        {
+            DebugBoundsGSBounds,              // Bounds constant buffer.
+            DebugBoundsRootParametersCount
         };
 
         // Cursor position and grid/block x/y indices.
@@ -179,6 +196,7 @@ namespace rsmgpt {
         ComPtr<ID3D12CommandQueue> m_commandQueue;
         ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
         RootSignature m_gfxRootSignature;
+        RootSignature m_gfxBoundsRootSignature;
         RootSignature m_computeRootSignature;
         ComPtr<ID3D12CommandSignature> m_commandSignature;
         CsuDescriptorHeapPtr m_pCsuHeap;
@@ -196,6 +214,7 @@ namespace rsmgpt {
         // Asset objects.
         ComPtr<ID3D12PipelineState> m_fullScreenTri3DPSO;
         ComPtr<ID3D12PipelineState> m_debugAccel3DPSO;
+        ComPtr<ID3D12PipelineState> m_debugAccelBounds3DPSO;
         ComPtr<ID3D12PipelineState> m_pathTracingComputePSO;
         ComPtr<ID3D12GraphicsCommandList> m_commandList;
         ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
@@ -336,8 +355,5 @@ namespace rsmgpt {
         ColorBuffer m_renderTargets[ FrameCount ];
     };
 #endif // 0
-
-
-
 
 }	// end of namespace rsmgpt

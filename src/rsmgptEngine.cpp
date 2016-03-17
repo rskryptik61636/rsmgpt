@@ -33,8 +33,13 @@
 #include <rsmgptPathTracingKernelCS.h>
 #include <rsmgptPathTracingOutputVS.h>
 #include <rsmgptPathTracingOutputPS.h>
+
 #include <rsmgptBasicVS.h>
 #include <rsmgptBasicPS.h>
+
+#include <rsmgptBoundsVS.h>
+#include <rsmgptBoundsGS.h>
+#include <rsmgptBoundsPS.h>
 
 namespace rsmgpt
 {
@@ -1234,8 +1239,44 @@ namespace rsmgpt
                 RTVFormats.data()
                 );
             psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;   // Set the rasterizer state fill mode to wireframe.
-            //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // NOTE: Uncomment to disable back-face culling.
+            psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // NOTE: Uncomment to disable back-face culling.
             ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_debugAccel3DPSO ) ) );
+        }
+
+        // Define the debug gfx bbox root signature.
+        {
+            //constexpr UINT matSize( sizeof( Mat4 ) / sizeof( UINT ) );
+            m_gfxBoundsRootSignature.reset( DebugBoundsRootParametersCount, 0 );
+
+            // BasicTrans VS constant buffer.
+            m_gfxBoundsRootSignature[ DebugBoundsGSBounds ].InitAsConstants(
+                sizeof( DebugBounds ) / sizeof( UINT ),
+                0,                                      // b0
+                0,                                      // space0
+                D3D12_SHADER_VISIBILITY_GEOMETRY );     // geometry shader visible
+
+            // Finalize the Bounds gfx root signature.
+            m_gfxBoundsRootSignature.finalize( m_d3d12Device.Get() );
+        }
+
+        // Define the debug gfx PSO.
+        {
+            // Describe and create the graphics pipeline state objects (PSO).
+            const std::array<DXGI_FORMAT, 1> RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM };
+            CD3DX12_GRAPHICS_PIPELINE_STATE_DESC psoDesc(
+                m_gfxBoundsRootSignature.get(),
+                { g_prsmgptBoundsVS, _countof( g_prsmgptBoundsVS ) },
+                { g_prsmgptBoundsPS, _countof( g_prsmgptBoundsPS ) },
+                { nullptr, 0 },
+                DXGI_FORMAT_D32_FLOAT,
+                1,
+                RTVFormats.data()
+                );
+            psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+            psoDesc.GS = { g_prsmgptBoundsGS, _countof( g_prsmgptBoundsGS ) };
+            //psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;   // Set the rasterizer state fill mode to solid.
+            psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // NOTE: Uncomment to disable back-face culling.
+            ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_debugAccelBounds3DPSO ) ) );
         }
 
         // Create the depth stencil view.
@@ -1669,12 +1710,37 @@ namespace rsmgpt
             0 );
 
         // Draw the model.
-        const Mat4 viewProj = Mat4::CreateRotationY( -.5 * XM_PI ) * m_pDebugPerspectiveCamera->viewProj();
+        const Mat4 viewProj = /*Mat4::CreateRotationY( -.5 * XM_PI ) **/ m_pDebugPerspectiveCamera->viewProj();
         m_pModel->draw(
             viewProj,
             DebugGfxVSBasicTrans,
             0,
             m_commandList.Get() );
+
+        // Set the primitive topology to line list and unbind the vertex/index buffers.
+        m_commandList->IASetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_POINTLIST );
+        m_commandList->IASetVertexBuffers( 0, 1, nullptr );
+        m_commandList->IASetIndexBuffer( nullptr );
+
+        // Set the debug bbox gfx root signature, PSO.
+        m_commandList->SetGraphicsRootSignature( m_gfxBoundsRootSignature.get() );
+        m_commandList->SetPipelineState( m_debugAccelBounds3DPSO.Get() );
+
+        // TODO: Need to traverse the BVH node tree and draw each bounds. Starting with only the root bounds for now.
+        const auto rootBounds = m_pModel->accel()->WorldBound();
+        DebugBounds dBounds = {
+            rootBounds.pMin,
+            0,
+            rootBounds.pMax,
+            0,
+            viewProj.Transpose()
+        };
+        m_commandList->SetGraphicsRoot32BitConstants(
+            DebugBoundsGSBounds,
+            sizeof( DebugBounds ) / sizeof( UINT ),
+            &dBounds,
+            0 );
+        m_commandList->DrawInstanced( 2, 1, 0, 0 );
 
         // Add a resource barrier indicating that the current back buffer will be used to present.
         D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier =

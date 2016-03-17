@@ -28,7 +28,7 @@ cbuffer BasicOutput : register( b0, space1 )
     float4 gOutputColour;  // Output colour.
 }
 
-float4 main( PS_IN pIn ) : SV_TARGET
+float4 main( BASIC_PS_IN pIn ) : SV_TARGET
 {
     return gOutputColour;
 }

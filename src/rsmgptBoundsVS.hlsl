@@ -20,44 +20,17 @@
 * THE SOFTWARE.
 ******************************************************************************/
 
-//#include <stdafx.h>
-#include <rsmgptEngine.h>
+#include "rsmgptBasicCommon.hlsli"
 
-using namespace rsmgpt;
+//// Bounds points.
+//cbuffer Bbox : register( b0 )
+//{
+//    Bounds gBounds;
+//}
 
-#pragma message("Linking against rsmgpt.lib")
-#pragma comment(lib, "rsmgpt.lib")
-
-#pragma message("Linking against DirectXTK.lib")
-#pragma comment(lib, "DirectXTK.lib")
-
-#ifdef _DEBUG
-
-#pragma message("Linking against assimp-vc130-mtd.lib")
-#pragma comment(lib, "assimp-vc130-mtd.lib")
-
-#else
-
-#pragma message("Linking against assimp-vc130-mt.lib")
-#pragma comment(lib, "assimp-vc130-mt.lib")
-
-#endif  // _DEBUG
-
-#if 0
-#pragma message("Linking against Core.lib")
-#pragma comment(lib, "Core.lib")
-
-#pragma message("Linking against ZLib.lib")
-#pragma comment(lib, "ZLib.lib")  
-#endif // 0
-
-
-//CREATE_APPLICATION( Engine );
-
-//_Use_decl_annotations_
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR cmdLine, int nCmdShow)
+BBOX_VS_OUT main( uint id : SV_VertexId )
 {
-	Engine pathTracer(cmdLine, Engine::/*OM_PATH_TRACER*/OM_DEBUG_ACCEL);
-    return pathTracer.Run( hInstance, nCmdShow );
-    //return 0;
+    BBOX_VS_OUT vOut;
+    vOut.position = float4( 0, 0, 0.5, 1 );
+    return vOut;
 }
