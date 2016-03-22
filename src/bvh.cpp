@@ -549,7 +549,9 @@ BVHBuildNode *BVHAccel::HLBVHBuild(
 
     // Compute Morton indices of primitives
     std::vector<MortonPrimitive> mortonPrims(primitiveInfo.size());
-    //ParallelFor([&](int i) {    // TODO: Need to implement this parallel for using tbb.
+#ifdef NDEBUG	// NOTE: Added just to keep things simple for debugging. Modify as necessary.
+#pragma omp parallel for schedule(dynamic, 512)       // OpenMP
+#endif	// NDEBUG
     for( int i = 0; i < primitiveInfo.size(); ++i )    {
         // Initialize _mortonPrims[i]_ for _i_th primitive
         constexpr int mortonBits = 10;
@@ -583,7 +585,9 @@ BVHBuildNode *BVHAccel::HLBVHBuild(
     // Create LBVHs for treelets in parallel
     std::atomic<int> atomicTotal(0), orderedPrimsOffset(0);
     orderedPrims.resize(primitives.size());
-    //ParallelFor([&](int i) {  // // TODO: Need to implement this parallel for using tbb.
+#ifdef NDEBUG	// NOTE: Added just to keep things simple for debugging. Modify as necessary.
+#pragma omp parallel for schedule(dynamic, 1)       // OpenMP
+#endif	// NDEBUG
     for( int i = 0; i < treeletsToBuild.size(); ++i )   {
         // Generate _i_th LBVH treelet
         int nodesCreated = 0;
@@ -896,7 +900,52 @@ bool BVHAccel::IntersectP( const std::vector<ModelVertex>& vertexList, const Ray
     return false;
 }
 
+void BVHAccel::drawNodes( const Mat4& viewProj, const UINT rootParamIndx, ID3D12GraphicsCommandList* pCmdList ) const
+{
+    if( !nodes ) return;
+    //ProfilePhase p( Prof::AccelIntersectP );
+    int nodesToVisit[ 64 ];
+    int toVisitOffset = 0, currentNodeIndex = 0;
+    DebugBounds dBounds;
+    while( true )
+    {
+        // Draw the bounds for this node.
+        const LinearBVHNode *node = &nodes[ currentNodeIndex ];
+        dBounds.pMin = node->bounds.pMin;
+        dBounds.pMax = node->bounds.pMax;
+        dBounds.viewProj = viewProj.Transpose();
+        pCmdList->SetGraphicsRoot32BitConstants(
+            rootParamIndx,
+            sizeof( DebugBounds ) / sizeof( UINT ),
+            &dBounds,
+            0 );
+        pCmdList->DrawInstanced( 2, 1, 0, 0 );
 
+        // Draw the bounds of all the primitives under this node.
+        if( node->nPrimitives > 0 )
+        {   
+            for( int i = 0; i < node->nPrimitives; ++i )
+            {
+                dBounds.pMin = primitives[ node->primitivesOffset + i ].bbox.pMin;
+                dBounds.pMax = primitives[ node->primitivesOffset + i ].bbox.pMax;
+                dBounds.viewProj = viewProj.Transpose();
+                pCmdList->SetGraphicsRoot32BitConstants(
+                    rootParamIndx,
+                    sizeof( DebugBounds ) / sizeof( UINT ),
+                    &dBounds,
+                    0 );
+                pCmdList->DrawInstanced( 2, 1, 0, 0 );
+            }
+            if( toVisitOffset == 0 ) break;
+            currentNodeIndex = nodesToVisit[ --toVisitOffset ];
+        }
+        else
+        {
+            nodesToVisit[ toVisitOffset++ ] = node->secondChildOffset;
+            currentNodeIndex = currentNodeIndex + 1;
+        }
+    }
+}
 
 BVHAccelPtr CreateBVHAccelerator(
     const PrimitiveList &prims,

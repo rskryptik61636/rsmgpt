@@ -333,6 +333,17 @@ struct DebugInfo
     UINT nTotalPrimIntersections;
 };
 
+struct DebugBounds
+{
+    Vec3 pMin;
+    UINT pad1;
+
+    Vec3 pMax;
+    UINT pad2;
+
+    Mat4 viewProj;
+};
+
 // BVHAccel Declarations
 class BVHAccel /*: public Aggregate*/ {
   public:
@@ -359,6 +370,8 @@ class BVHAccel /*: public Aggregate*/ {
 #if 0
     bool Intersect( const Ray &ray, SurfaceInteraction *isect ) const;    
 #endif // 0
+
+    void drawNodes( const Mat4& viewProj, const UINT rootParamIndx, ID3D12GraphicsCommandList* pCmdList ) const;
 
 
   private:
