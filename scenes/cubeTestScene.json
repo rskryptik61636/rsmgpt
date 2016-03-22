@@ -26,6 +26,11 @@
 		}        
 	],
 
+	// Acceleration structure
+	"accel" : {
+		"type" : "hlbvh"
+	},
+
 	// Text parameters.
 	"text" : {
 		"font"				: "Verdana",
