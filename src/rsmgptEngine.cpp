@@ -832,7 +832,8 @@ namespace rsmgpt
             const path 
                 modelsRoot( m_configRoot[ "models_dir" ].asString() ),
                 modelPath( modelsRoot / path( modelsConfig[0]["filename"].asString() ) );
-            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get() ) );            
+            
+            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get(), m_configRoot[ "accel" ][ "type" ].asString(), m_modelWorldTransform ) );
         }
 
         // TODO: Testing ray-model intersection. Remove when done testing.
@@ -1259,7 +1260,7 @@ namespace rsmgpt
             m_gfxBoundsRootSignature.finalize( m_d3d12Device.Get() );
         }
 
-        // Define the debug gfx PSO.
+        // Define the debug bounds PSO.
         {
             // Describe and create the graphics pipeline state objects (PSO).
             const std::array<DXGI_FORMAT, 1> RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM };
@@ -1313,22 +1314,35 @@ namespace rsmgpt
 
         // Create the debug camera.
         {
-            // TODO: Need to read camera params from the scene file.
-            //const float fWidth = static_cast<float>( m_width ), fHeight = static_cast<float>( m_height );
+            const auto& cameraConfig = m_configRoot[ "camera" ];
             const float
+                focalLength( cameraConfig[ "focal_length" ].asFloat() ),
+                lensRadius( cameraConfig[ "lens_radius" ].asFloat() ),
                 fWidth( static_cast<float>( m_width ) ),
                 fHeight( static_cast<float>( m_height ) ),
-                fov( .25f * XM_PI /*90*/ ),
+                fov( cameraConfig[ "field_of_view" ].asFloat() / 180.f * XM_PI ),
                 aspectRatio( fWidth / fHeight ),
-                nearPlane( /*1e-2f*/ 1.f ),
-                farPlane( 1000.f ),
-                motionFactor( .05f ),
-                rotationFactor( .05f ),
+                nearPlane( cameraConfig[ "near_plane" ].asFloat() ),
+                farPlane( cameraConfig[ "far_plane" ].asFloat() ),
+                motionFactor( cameraConfig[ "motion_factor" ].asFloat() ),
+                rotationFactor( cameraConfig[ "rotation_factor" ].asFloat() ),
                 screenxmin( aspectRatio > 1.f ? -aspectRatio : -1 ),    // These seem to be the corners of the window in homogeneous clip space.
                 screenxmax( aspectRatio > 1.f ? aspectRatio : 1 ),
                 screenymin( aspectRatio < 1.f ? -1.f / aspectRatio : -1 ),
                 screenymax( aspectRatio < 1.f ? 1.f / aspectRatio : 1 );
-            const Vec3 eye( 0, 0, -10 ), lookAt( 0, 0, 0 ), up( 0, 1, 0 );
+            const Vec3
+                eye(
+                    cameraConfig[ "eye" ][ 0 ].asFloat(),
+                    cameraConfig[ "eye" ][ 1 ].asFloat(),
+                    cameraConfig[ "eye" ][ 2 ].asFloat() ),
+                lookAt(
+                    cameraConfig[ "look_at" ][ 0 ].asFloat(),
+                    cameraConfig[ "look_at" ][ 1 ].asFloat(),
+                    cameraConfig[ "look_at" ][ 2 ].asFloat() ),
+                up(
+                    cameraConfig[ "up" ][ 0 ].asFloat(),
+                    cameraConfig[ "up" ][ 1 ].asFloat(),
+                    cameraConfig[ "up" ][ 2 ].asFloat() );
             m_pDebugPerspectiveCamera.reset(
                 new DebugPerspectiveCamera(
                     eye,
@@ -1351,10 +1365,52 @@ namespace rsmgpt
                 m_debugAccel3DPSO.Get(),                      // Pipeline state
                 IID_PPV_ARGS( &m_commandList ) ) );         // Command list (output)
 
+#if 0
+        // Define the generic index buffer for all bounds.
+        ComPtr<ID3D12Resource> indexBufferUpload;
+        {
+            const UINT bboxIndices[] = { 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 4, 5, 0, 6, 1, 7, 2 };
+            const UINT indexBufferSize = sizeof( bboxIndices );
+
+            // Create the vertex buffer resource.
+            createCommittedDefaultBuffer(
+                m_d3d12Device.Get(),
+                m_boundsIndexBuffer,
+                D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
+                indexBufferSize,
+                D3D12_RESOURCE_FLAG_NONE,
+                0,
+                nullptr,
+                m_commandList.Get(),
+                indexBufferUpload,
+                reinterpret_cast<const void*>( bboxIndices ) );
+
+            // Add a resource barrier to indicate that the index buffer is transitioning from a copy dest to being used as an index buffer.
+            m_commandList->ResourceBarrier(
+                1,
+                &CD3DX12_RESOURCE_BARRIER::Transition(
+                    m_boundsIndexBuffer.Get(),
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    D3D12_RESOURCE_STATE_INDEX_BUFFER ) );
+
+            // Initialize the index buffer view.
+            m_boundsIndexBufferView.Format = DXGI_FORMAT_R32_UINT;
+            m_boundsIndexBufferView.BufferLocation = m_boundsIndexBuffer->GetGPUVirtualAddress();
+            //m_boundsIndexBufferView.StrideInBytes = sizeof( Vertex );
+            m_boundsIndexBufferView.SizeInBytes = indexBufferSize;
+        }
+#endif // 0
+
+
         // Load the test model.
         {
-            const path modelPath( "N:\\rsmgpt\\models\\test1.obj" );
-            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get(), true ) );
+            const auto& modelsConfig = m_configRoot[ "models" ];
+            m_modelWorldTransform = /*isSpider ? Mat4::CreateRotationY( -0.5 * XM_PI ) :*/ Mat4::Identity;
+
+            const path
+                modelsRoot( m_configRoot[ "models_dir" ].asString() ),
+                modelPath( modelsRoot / path( modelsConfig[ 0 ][ "filename" ].asString() ) );
+            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get(), m_configRoot[ "accel" ][ "type" ].asString(), m_modelWorldTransform, true ) );
         }
 
         // Close the command list and execute it to begin the vertex buffer copy into the default heap.
@@ -1701,7 +1757,7 @@ namespace rsmgpt
         m_commandList->ClearRenderTargetView( rtvHandle, clearColor, 0, nullptr );
         m_commandList->ClearDepthStencilView( dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr );
 
-        // Set the debug PS constants.
+        //// Set the debug PS constants.
         const Color debugColour = Color( 1.f, 0.f, 0.f, 1.f );  // Use a debug colour of red.
         m_commandList->SetGraphicsRoot32BitConstants(
             DebugGfxPSBasicOutput,
@@ -1720,27 +1776,14 @@ namespace rsmgpt
         // Set the primitive topology to line list and unbind the vertex/index buffers.
         m_commandList->IASetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_POINTLIST );
         m_commandList->IASetVertexBuffers( 0, 1, nullptr );
-        m_commandList->IASetIndexBuffer( nullptr );
+        m_commandList->IASetIndexBuffer( nullptr /*&m_boundsIndexBufferView*/ );
 
         // Set the debug bbox gfx root signature, PSO.
         m_commandList->SetGraphicsRootSignature( m_gfxBoundsRootSignature.get() );
         m_commandList->SetPipelineState( m_debugAccelBounds3DPSO.Get() );
 
-        // TODO: Need to traverse the BVH node tree and draw each bounds. Starting with only the root bounds for now.
-        const auto rootBounds = m_pModel->accel()->WorldBound();
-        DebugBounds dBounds = {
-            rootBounds.pMin,
-            0,
-            rootBounds.pMax,
-            0,
-            viewProj.Transpose()
-        };
-        m_commandList->SetGraphicsRoot32BitConstants(
-            DebugBoundsGSBounds,
-            sizeof( DebugBounds ) / sizeof( UINT ),
-            &dBounds,
-            0 );
-        m_commandList->DrawInstanced( 2, 1, 0, 0 );
+        // Traverse the BVH node tree and draw each bounds.
+        m_pModel->accel()->drawNodes( viewProj, DebugBoundsGSBounds, m_commandList.Get() );
 
         // Add a resource barrier indicating that the current back buffer will be used to present.
         D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier =

@@ -144,17 +144,6 @@ namespace rsmgpt {
             DebugGfxRootParametersCount
         };
 
-        struct DebugBounds
-        {
-            Vec3 pMin;
-            UINT pad1;
-
-            Vec3 pMax;
-            UINT pad2;
-            
-            Mat4 viewProj;
-        };
-
         enum DebugBoundsRootParameters
         {
             DebugBoundsGSBounds,              // Bounds constant buffer.
@@ -221,6 +210,9 @@ namespace rsmgpt {
         ComPtr<ID2D1SolidColorBrush> m_textBrush;
         ComPtr<IDWriteTextFormat> m_textFormat;
         ComPtr<ID3D12Resource> m_vertexBuffer;
+        D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+        /*ComPtr<ID3D12Resource> m_boundsIndexBuffer;
+        D3D12_INDEX_BUFFER_VIEW m_boundsIndexBufferView;*/
         ComPtr<ID3D12Resource> m_constantBuffer;
         ComPtr<ID3D12Resource> m_debugInfoDefault;
         ComPtr<ID3D12Resource> m_debugInfoReadback;
@@ -230,7 +222,6 @@ namespace rsmgpt {
         ComPtr<ID3D12Resource> m_timestampResultBuffer;
         UINT64 m_computeCommandQueueTimestampFrequency;
         UINT64 m_pathTracingTime;
-        D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 
         // Model params.
         ModelPtr m_pModel;
