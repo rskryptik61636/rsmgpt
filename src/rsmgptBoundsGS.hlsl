@@ -30,20 +30,79 @@ cbuffer DebugBounds : register( b0 )
     float4x4 gVP;
 }
 
-[maxvertexcount(8)]
+[maxvertexcount(17)]
 void main(
 	point BBOX_VS_OUT input[1], 
 	inout LineStream< BBOX_PS_IN > output
 )
 {
-	// To begin with, append the pMin/pMax of gBounds.
+	// Pt 0: (xmin, ymin, zmin)
     BBOX_PS_IN vOut;
-    float4 vMin = mul( float4( pMin.x, pMin.y, pMin.z, 1.f ), gVP );
-    vOut.position = vMin;
+    vOut.position = mul( float4( pMin.x, pMin.y, pMin.z, 1.f ), gVP );
     output.Append( vOut );
 
-    float4 vMax = mul( float4( pMax.x, pMax.y, pMax.z, 1.f ), gVP );
-    vOut.position = vMax;
+    // Pt 1: (xmax, ymin, zmin)
+    vOut.position = mul( float4( pMax.x, pMin.y, pMin.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 2: (xmax, ymax, zmin)
+    vOut.position = mul( float4( pMax.x, pMax.y, pMin.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 3: (xmin, ymax, zmin)
+    vOut.position = mul( float4( pMin.x, pMax.y, pMin.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 4: (xmin, ymax, zmax)
+    vOut.position = mul( float4( pMin.x, pMax.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 5: (xmin, ymin, zmax)
+    vOut.position = mul( float4( pMin.x, pMin.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 6: (xmax, ymin, zmax)
+    vOut.position = mul( float4( pMax.x, pMin.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 7: (xmax, ymax, zmax)
+    vOut.position = mul( float4( pMax.x, pMax.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 4: (xmin, ymax, zmax)
+    vOut.position = mul( float4( pMin.x, pMax.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 5: (xmin, ymin, zmax)
+    vOut.position = mul( float4( pMin.x, pMin.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 0: (xmin, ymin, zmin)
+    vOut.position = mul( float4( pMin.x, pMin.y, pMin.z, 1.f ), gVP );
+    output.Append( vOut );
+    
+    // Pt 3: (xmin, ymax, zmin)
+    vOut.position = mul( float4( pMin.x, pMax.y, pMin.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 2: (xmax, ymax, zmin)
+    vOut.position = mul( float4( pMax.x, pMax.y, pMin.z, 1.f ), gVP );
+    output.Append( vOut );
+    
+    // Pt 1: (xmax, ymin, zmin)
+    vOut.position = mul( float4( pMax.x, pMin.y, pMin.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 6: (xmax, ymin, zmax)
+    vOut.position = mul( float4( pMax.x, pMin.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 7: (xmax, ymax, zmax)
+    vOut.position = mul( float4( pMax.x, pMax.y, pMax.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 2: (xmax, ymax, zmin)
+    vOut.position = mul( float4( pMax.x, pMax.y, pMin.z, 1.f ), gVP );
     output.Append( vOut );
 
     output.RestartStrip();
