@@ -30,7 +30,8 @@ namespace rsmgpt
         const path modelPath,
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
-        //const Mat4& initialWorldTransform /*= Mat4::Identity*/,
+        const std::string& accelType,
+        const Mat4& initialWorldTransform /*= Mat4::Identity*/,
         const bool isDrawable /*= false*/,
         const unsigned int uiImportOptions /*= 
             aiProcess_MakeLeftHanded | 
@@ -147,7 +148,18 @@ namespace rsmgpt
         recursiveNodeConstructor( /*initialWorldTransform,*/ m_pModelScene->mRootNode, m_rootNode, transStack );
 
         // Build the BVH acceleration structure.
-        m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::SAH, 4, pDevice, pCommandList );
+        if( accelType == "sah" )
+        {
+            m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::SAH, 4, pDevice, pCommandList );
+        }
+        else if( accelType == "hlbvh" )
+        {
+            m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::HLBVH, 4, pDevice, pCommandList );
+        }
+        else
+        {
+            throw( "Unsupported acceleration structure!" );
+        }
 
         // @TODO: add implementation here
 

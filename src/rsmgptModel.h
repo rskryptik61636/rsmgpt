@@ -45,7 +45,8 @@ public:
         const path modelPath,
         ID3D12Device* pDevice,
         ID3D12GraphicsCommandList* pCommandList,
-        //const Mat4& initialWorldTransform = Mat4::Identity,
+        const std::string& accelType,
+        const Mat4& initialWorldTransform = Mat4::Identity,
         const bool isDrawable = false,
         const unsigned int uiImportOptions = 
             aiProcess_MakeLeftHanded | 
