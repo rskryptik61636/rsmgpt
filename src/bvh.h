@@ -259,12 +259,15 @@ public:
         float *hitt1 = nullptr ) const;    
 #endif // 0
 
-    inline bool IntersectP( const Ray &ray, const Vec3 &invDir,
-        const int dirIsNeg[ 3 ] ) const
+    inline bool IntersectP( 
+        const Ray &ray, 
+        const Vec3 &invDir,
+        const int dirIsNeg[ 3 ],
+        float& tMin ) const
     {
         const Bounds3f &bounds = *this;
         // Check for ray intersection against $x$ and $y$ slabs
-        float tMin = ( bounds[ dirIsNeg[ 0 ] ].x - ray.o.x ) * invDir.x;
+        tMin = ( bounds[ dirIsNeg[ 0 ] ].x - ray.o.x ) * invDir.x;
         float tMax = ( bounds[ 1 - dirIsNeg[ 0 ] ].x - ray.o.x ) * invDir.x;
         float tyMin = ( bounds[ dirIsNeg[ 1 ] ].y - ray.o.y ) * invDir.y;
         float tyMax = ( bounds[ 1 - dirIsNeg[ 1 ] ].y - ray.o.y ) * invDir.y;
@@ -366,8 +369,11 @@ class BVHAccel /*: public Aggregate*/ {
     const int nBVHNodes() const { return totalNodes; }
     const UINT nodeSize() const;    // NOTE: Defining in bvh.cpp because that is where LinearBVHNode is defined.
 
-    bool IntersectP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const;
+    bool IntersectP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const;    
+    bool IntersectStacklessP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const;
 #if 0
+    void PopShortStack( const uint32_t rootLevel, uint32_t& popLevel, uint32_t& level, uint32_t& stackTrail, bool& stopTraversal, int& shortStackOffset, int* pShortStack, LinearBVHNode* pNode );
+
     bool Intersect( const Ray &ray, SurfaceInteraction *isect ) const;    
 #endif // 0
 
@@ -393,7 +399,7 @@ class BVHAccel /*: public Aggregate*/ {
     BVHBuildNode *buildUpperSAH(MemoryArena &arena,
                                 std::vector<BVHBuildNode *> &treeletRoots,
                                 int start, int end, int *totalNodes) const;
-    int flattenBVHTree(BVHBuildNode *node, int *offset);
+    int flattenBVHTree(const int parentOffset, BVHBuildNode *node, int *offset);
 
     // BVHAccel Private Data
     const int maxPrimsInNode;

@@ -41,6 +41,7 @@
 //#include "paramset.h"
 //#include "stats.h"
 #include <algorithm>
+#include <intrin.h>
 
 //STAT_TIMER("Time/BVH construction", constructionTime);
 //STAT_MEMORY_COUNTER("Memory/BVH tree", treeBytes);
@@ -103,6 +104,8 @@ struct LBVHTreelet {
 
 struct LinearBVHNode {
     Bounds3f bounds;
+    int parentOffset;   // Parent node.
+    int siblingOffset;  // Offset of the sibling of this node.
     union {
         int primitivesOffset;   // leaf
         int secondChildOffset;  // interior
@@ -246,7 +249,8 @@ bool Primitive::IntersectP(
     b1 *= invDet;
     b2 *= invDet;
 
-    return true;
+    return ( t <= ray.tMax );
+    //return true;
 }
 
 bool Inside( const Point3 &p, const Bounds3f &b )
@@ -343,8 +347,9 @@ BVHAccel::BVHAccel(
     /*treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);*/   // TODO: treeBytes needs to be in thread local storage.
     nodes = AllocAligned<LinearBVHNode>(totalNodes);
-    int offset = 0;
-    flattenBVHTree(root, &offset);
+    ::memset( nodes, 0, totalNodes * sizeof( LinearBVHNode ) );
+    int offset = 0, parentOffset = 0;
+    flattenBVHTree(parentOffset, root, &offset);
     assert(offset == totalNodes);
 
     // Create a buffer resource for nodes.
@@ -353,12 +358,21 @@ BVHAccel::BVHAccel(
         m_pNodesBuffer,
         D3D12_RESOURCE_STATE_COPY_DEST,                         // Initial resource state is copy dest as the data
         totalNodes * sizeof( LinearBVHNode ),
-        D3D12_RESOURCE_FLAG_NONE,
+        //D3D12_RESOURCE_FLAG_NONE,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
         0,
         nullptr,
         pCmdList,
         m_pNodesUpload,
         nodes );
+
+    // Transition the nodes resource from copy dest state to unordered access.
+    D3D12_RESOURCE_BARRIER nodesBarrier =
+        CD3DX12_RESOURCE_BARRIER::Transition(
+            m_pNodesBuffer.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS );
+    pCmdList->ResourceBarrier( 1, &nodesBarrier );
 }
 
 Bounds3f BVHAccel::WorldBound() const {
@@ -773,9 +787,10 @@ BVHBuildNode *BVHAccel::buildUpperSAH(MemoryArena &arena,
     return node;
 }
 
-int BVHAccel::flattenBVHTree(BVHBuildNode *node, int *offset) {
+int BVHAccel::flattenBVHTree(const int parentOffset, BVHBuildNode *node, int *offset) {
     LinearBVHNode *linearNode = &nodes[*offset];
     linearNode->bounds = node->bounds;
+    linearNode->parentOffset = parentOffset;
     int myOffset = (*offset)++;
     if (node->nPrimitives > 0) {
         assert(!node->children[0] && !node->children[1]);
@@ -786,9 +801,13 @@ int BVHAccel::flattenBVHTree(BVHBuildNode *node, int *offset) {
         // Create interior flattened BVH node
         linearNode->axis = node->splitAxis;
         linearNode->nPrimitives = 0;
-        flattenBVHTree(node->children[0], offset);
+        flattenBVHTree(myOffset, node->children[0], offset);
         linearNode->secondChildOffset =
-            flattenBVHTree(node->children[1], offset);
+            flattenBVHTree(myOffset, node->children[1], offset);
+
+        // Set the sibling offsets for the child nodes.
+        nodes[ *offset ].siblingOffset = linearNode->secondChildOffset;
+        nodes[ linearNode->secondChildOffset ].siblingOffset = *offset;
     }
     return myOffset;
 }
@@ -857,10 +876,11 @@ bool BVHAccel::IntersectP( const std::vector<ModelVertex>& vertexList, const Ray
     int dirIsNeg[ 3 ] = { invDir.x < 0, invDir.y < 0, invDir.z < 0 };
     int nodesToVisit[ 64 ];
     int toVisitOffset = 0, currentNodeIndex = 0;
+    float boxtMin, boxtMax;
     while( true )
     {
         const LinearBVHNode *node = &nodes[ currentNodeIndex ];
-        if( node->bounds.IntersectP( ray, invDir, dirIsNeg ) )
+        if( node->bounds.IntersectP( ray, invDir, dirIsNeg, boxtMin ) )
         {
             // Process BVH node _node_ for traversal
             if( node->nPrimitives > 0 )
@@ -899,6 +919,218 @@ bool BVHAccel::IntersectP( const std::vector<ModelVertex>& vertexList, const Ray
     }
     return false;
 }
+
+bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const
+{
+    if( !nodes ) return false;
+    //ProfilePhase p( Prof::AccelIntersectP );
+    // MBVH2 traversal loop
+    const Vec3 invDir = Vec3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
+    const int dirIsNeg[] = { invDir.x < 0, invDir.y < 0, invDir.z < 0 };
+    UINT nodeId = 0, junk, hitPrimIndx;
+    UINT bitstack = 0;
+    UINT /*parentId = 0,*/ siblingId = 0; // cached node links
+    const float oritMax = ray.tMax;
+    float tMin = ray.tMax, b1Hit, b2Hit;
+    bool stopTraversal = false;
+
+    //for( ; ;)
+    while( true )
+    {
+        // Inner node loop
+        while( nodes[ nodeId ].nPrimitives == 0 )
+        {
+            //// Check if the current node is hit.
+            //Bounds3f parentBox = transformBounds( nodes[ nodeId ].bounds, gWorld );
+            //if( !boxIntersect( ray, parentBox, invDir, dirIsNeg ) )
+            //    break;
+
+            //// Set the parentId to the current nodeId.
+            //parentId = nodeId;
+
+            // Check if either of the children will be hit.
+            const UINT leftChildIndx = nodeId + 1;
+            const UINT rightChildIndx = nodes[ nodeId ].secondChildOffset;
+            const Bounds3f leftBox = nodes[ leftChildIndx ].bounds;
+            const Bounds3f rightBox = nodes[ rightChildIndx ].bounds;
+            float leftBoxt, rightBoxt;
+            const bool leftHit = leftBox.IntersectP( ray, invDir, dirIsNeg, leftBoxt ); //boxIntersect( ray, leftBox, invDir, dirIsNeg, leftBoxt );
+            const bool rightHit = rightBox.IntersectP( ray, invDir, dirIsNeg, rightBoxt ); //boxIntersect( ray, rightBox, invDir, dirIsNeg, rightBoxt );
+
+            // Terminate this loop if neither of the children were hit.
+            if( !leftHit && !rightHit )
+                break;
+
+            // Push a 0 onto the bitstack to indicate that we are going to traverse the next level of the tree.
+            bitstack <<= 1;
+
+            // If both children are hit, set nodeId to that of the left child.
+            if( leftHit && rightHit )
+            {
+                //nodeId = ( leftBoxt < rightBoxt ) ? leftChildIndx : rightChildIndx; //( near1 < near0 ) ? nid.w : nid.z;
+
+                // Set nodeId to that of the nearest child node.
+                if( leftBoxt < rightBoxt )
+                {
+                    nodeId = leftChildIndx;
+                    siblingId = rightChildIndx;
+                    nodes[ nodeId ].siblingOffset = rightChildIndx;
+                }
+                else
+                {
+                    nodeId = rightChildIndx;
+                    siblingId = leftChildIndx;
+                    nodes[ nodeId ].siblingOffset = leftChildIndx;
+                }
+
+                // Set the lowest bit of the bitstack to 1 to indicate that the near child has been traversed.
+                bitstack |= 1;
+            }
+            else
+            {
+                //nodeId = hit0 ? nid.z : nid.w;
+
+                // Set nodeId to that of the intersected child.
+                //nodeId = leftHit ? leftChildIndx : rightChildIndx;
+                if( leftHit )
+                {
+                    nodeId = leftChildIndx;
+                    siblingId = rightChildIndx;
+                    nodes[ nodeId ].siblingOffset = rightChildIndx;
+                }
+                else
+                {
+                    nodeId = rightChildIndx;
+                    siblingId = leftChildIndx;
+                    nodes[ nodeId ].siblingOffset = leftChildIndx;
+                }
+                
+            }
+        }
+        // Leaf node
+        if( nodes[ nodeId ].nPrimitives > 0 )
+        {
+            // Process BVH node _node_ for traversal
+            float t, b1, b2;
+            for( UINT i = 0; i < nodes[ nodeId ].nPrimitives; ++i )
+            {
+                // Check if the i'th primitive is hit.
+                //Primitive prim = primitives[ nodes[ nodeId ].primitivesOffset + i ];
+                /*Triangle tri = {
+                    mul( float4( gVertexBuffer[ prim.p0 ].position, 1.0 ), gWorld ).xyz,
+                    mul( float4( gVertexBuffer[ prim.p1 ].position, 1.0 ), gWorld ).xyz,
+                    mul( float4( gVertexBuffer[ prim.p2 ].position, 1.0 ), gWorld ).xyz };*/
+                //if( triangleIntersectWithBackFaceCulling( ray, tri, t, b1, b2 ) )
+                if( primitives[ nodes[ nodeId ].primitivesOffset + i ].IntersectP( vertexList, ray, t, b1, b2 ) )
+                {
+                    // Set tMin to t if it is lesser. This is to ensure that the closest primitive is hit.
+                    if( t < tMin )
+                    {
+                        tMin = t;
+                        hitPrimIndx = nodes[ nodeId ].primitivesOffset + i;
+                        b1Hit = b1;
+                        b2Hit = b2;
+                    }
+                }
+            }
+            /*if( toVisitOffset == 0 ) break;
+            currentNodeIndex = nodesToVisit[ --toVisitOffset ];*/
+        }
+        // Backtrack
+        while( ( bitstack & 1 ) == 0 )
+        {
+            // All the nodes have been traversed, we're done.
+            if( bitstack == 0 )
+            {
+                stopTraversal = true;
+                break;
+            }
+
+            // Set the current nodeId to that of the parent of current node.
+            nodeId = nodes[ nodeId ].parentOffset;
+            siblingId = nodes[ nodeId ].siblingOffset;
+            bitstack >>= 1;
+        }
+
+        // End the traversal if necessary.
+
+        if( stopTraversal )
+            break;
+
+        if( siblingId != 0 )
+            nodeId = siblingId;
+        bitstack ^= 1;
+    }
+
+    // If tMin is no longer tMax, then we have intersected a primitive.
+    if( tMin < oritMax )
+    {
+        //// Triangle's colour.
+        //float4 LColor = gVertexBuffer[ gPrimitives[ hitPrimIndx ].p0 ].color;
+
+        //// Triangle's transformed surface normal.
+        //Vec3 N =
+        //    b1Hit * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p0 ].normal +
+        //    b2Hit * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p1 ].normal +
+        //    ( 1 - b1Hit - b2Hit ) * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p2 ].normal;
+        //N = mul( N, (float3x3)gWorldInvTranspose );
+
+        //// Half-way vector.
+        //Vec3 hitPt = ray.o + tMin * ray.d;
+        //Vec3 V = normalize( ray.o - hitPt );
+        //Vec3 H = normalize( L + V );
+
+        //// TODO: Remove when done testing.
+        ////// Check if the triangle has a diffuse component.
+        ////if( dot( -N, -L ) > 0 /*|| dot( N, ray.d ) < 0*/ )
+        ////{
+        ////    color = float4( 1, 0, 0, 1 );
+        ////}
+
+        //// Compute Phong-blinn shading for the intersected triangle.
+        //color = calcBlinnPhongLighting( M, LColor, AColor, N, L, H );
+        
+        return true;
+    }
+
+    return false;
+}
+
+#if 0
+void BVHAccel::PopShortStack( const uint32_t rootLevel, uint32_t& popLevel, uint32_t& level, uint32_t& stackTrail, bool& stopTraversal, int& shortStackOffset, int* pShortStack, LinearBVHNode* pNode )
+{
+    // Find the first zero bit before the highest one bit in stackTrail.
+    constexpr unsigned long msbMask = 0xffffffff;
+    unsigned long highestSet;
+    _BitScanReverse( &highestSet, msbMask );    // NOTE: The equivalent of this in HLSL is firstbithigh (see https://msdn.microsoft.com/en-us/library/windows/desktop/ff471400%28v=vs.85%29.aspx).
+    level = highestSet + 1;
+
+    // Set stackTrail[level] bit.
+    stackTrail = ( 1 << level );
+
+    // stopTraversal is true if the rootLevel bit is the only bit set in stackTrail.
+    stopTraversal = ( stackTrail & ( 1 << rootLevel ) );
+
+    // Set popLevel to level.
+    popLevel = level;
+
+    // If the short stack is empty, set pNode to the root node and level to 0.
+    if( !shortStackOffset )
+    {
+        pNode = nodes;
+        level = 0;
+    }
+
+    // Set node to whatever is popped from the short stack.
+    else
+    {
+        pNode = &nodes[ shortStackOffset-- ];
+    }
+}
+
+
+#endif // 0
+
 
 void BVHAccel::drawNodes( const Mat4& viewProj, const UINT rootParamIndx, ID3D12GraphicsCommandList* pCmdList ) const
 {

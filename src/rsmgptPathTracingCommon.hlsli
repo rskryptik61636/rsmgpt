@@ -113,6 +113,8 @@ struct Primitive
 struct LinearBVHNode
 {
     Bounds bounds;
+    int parentOffset;   // Offset of the parent node.
+    int siblingOffset;  // Offset of the sibling of the current node.
     int primitivesOrSecondChildOffset;   // primitivesOffset if leaf or secondChildOffset if interior
     uint nPrimitivesAndAxis;    // NOTE: nPrimitives is stored in bits 0-15 and axis in bits 16-23.
 };
@@ -232,7 +234,7 @@ bool sphereIntersect( in Ray ray, in Sphere sphere )
 }
 
 // Ray - triangle intersection.
-bool triangleIntersectWithBackFaceCulling( in Ray ray, in Triangle tri, out float t, out float b1, out float b2 )
+bool triangleIntersectWithBackFaceCulling( inout Ray ray, in Triangle tri, out float t, out float b1, out float b2 )
 {
     // Compute the edge vectors for (v1 - v0) and (v2 - v0).
     const float3 o = ray.o, d = ray.d, v0 = tri.v0, v1 = tri.v1, v2 = tri.v2;
@@ -271,6 +273,9 @@ bool triangleIntersectWithBackFaceCulling( in Ray ray, in Triangle tri, out floa
     t = dot( s2, e2 ) * invDet;
     b1 *= invDet;
     b2 *= invDet;
+
+    // Reduce ray.tMax to t.
+    ray.tMax = t;
     
     return true;
 }
@@ -318,10 +323,10 @@ bool triangleIntersectWithoutBackFaceCulling( in Ray ray, in Triangle tri, out f
 
 // Ray - box intersection test.
 // NOTE: Adapted from Bounds3f IntersectP (see bvh.h)
-bool boxIntersect( in Ray ray, in Bounds bounds, in float3 invDir, in int3 dirIsNeg )
+bool boxIntersect( in Ray ray, in Bounds bounds, in float3 invDir, in int3 dirIsNeg, inout float tMin )
 {
     // Check for ray intersection against $x$ and $y$ slabs
-    float tMin = ( getBoundsPt( bounds, dirIsNeg[ 0 ] ).x - ray.o.x ) * invDir.x;
+    /*float*/ tMin = ( getBoundsPt( bounds, dirIsNeg[ 0 ] ).x - ray.o.x ) * invDir.x;
     float tMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 0 ] ).x - ray.o.x ) * invDir.x;
     float tyMin = ( getBoundsPt( bounds, dirIsNeg[ 1 ] ).y - ray.o.y ) * invDir.y;
     float tyMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 1 ] ).y - ray.o.y ) * invDir.y;
@@ -342,5 +347,8 @@ bool boxIntersect( in Ray ray, in Bounds bounds, in float3 invDir, in int3 dirIs
     if( tMin > tzMax || tzMin > tMax ) return false;
     if( tzMin > tMin ) tMin = tzMin;
     if( tzMax < tMax ) tMax = tzMax;
+
+    // NOTE: Do not update this to reduce ray's tMax to t because we want to be able to intersect any primitives that lie within this box.
+    //       Might be worthwhile to add a flag to specify this box is being used as a bounding box or not.
     return ( tMin < ray.tMax ) && ( tMax > 0 );
 }

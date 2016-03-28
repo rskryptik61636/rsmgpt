@@ -131,8 +131,8 @@ namespace rsmgpt {
         {
             PTComputeCbvOffset = 0,                                       // Path tracing kernel constant buffer.
             PTComputeSrvOffset = PTComputeCbvOffset + 1,                  // Path tracing kernel vertex buffer, primitive and BVH SRVs.
-            PTComputeUavOffset = PTComputeSrvOffset + 3,                  // Path tracing kernel render output UAV.
-            PTGfxSrvOffset = PTComputeUavOffset + 2,                      // Path tracing kernel render output SRV (used to finally display the rendered output).
+            PTComputeUavOffset = PTComputeSrvOffset + 2,                  // Path tracing kernel render output UAV.
+            PTGfxSrvOffset = PTComputeUavOffset + 3,                      // Path tracing kernel render output SRV (used to finally display the rendered output).
             PTCbvSrvUavDescriptorCountPerFrame = PTGfxSrvOffset + 1
         };
 

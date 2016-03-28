@@ -498,11 +498,11 @@ namespace rsmgpt
             m_computeRootSignature[ PTCbvCbPerFrame ].InitAsConstantBufferView( 0 );
 
             // The second compute root parameter is a table to the model vertex buffer, primitive and BVH node array SRVs.
-            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0 );
+            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0 );
             m_computeRootSignature[ PTComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
 
             // The third compute root parameter is a table to the render output UAVs.
-            CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0 );
+            CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, 0 );
             m_computeRootSignature[ PTComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
             m_computeRootSignature.finalize( m_d3d12Device.Get() );
         }
@@ -938,10 +938,10 @@ namespace rsmgpt
             primDesc.Buffer.StructureByteStride = m_pModel->accel()->primitiveSize();
             m_pCsuHeap->addSRV( m_pModel->accel()->primitivesResource(), &primDesc, "gPrimitives" );
 
-            D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
+            /*D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
             nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
             nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
-            m_pCsuHeap->addSRV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
+            m_pCsuHeap->addSRV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );*/
 
             // Create the UAV to the path tracer output.
             D3D12_UNORDERED_ACCESS_VIEW_DESC pathTracerOutputUavDesc = {};
@@ -959,6 +959,11 @@ namespace rsmgpt
             debugInfoUavDesc.Buffer.NumElements = 1;
             debugInfoUavDesc.Buffer.StructureByteStride = sizeof( DebugInfo );
             m_pCsuHeap->addUAV( m_debugInfoDefault.Get(), &debugInfoUavDesc, "gDebugInfo" );
+
+            D3D12_UNORDERED_ACCESS_VIEW_DESC nodesDesc( debugInfoUavDesc );
+            nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
+            nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
+            m_pCsuHeap->addUAV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
 
             // Create the SRV to the path tracer output.
             D3D12_SHADER_RESOURCE_VIEW_DESC pathTracerOutputSrvDesc = {};
@@ -1595,7 +1600,7 @@ namespace rsmgpt
             m_commandList->ResourceBarrier( 1, &ptoBarrier );
 
             // NOTE: Shouldn't do this since we're rendering text on top of this render target.
-#if 1
+#if 0
             //// Indicate that the back buffer will now be used to present.
             rtBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
             rtBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;

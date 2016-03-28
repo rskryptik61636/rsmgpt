@@ -1,8 +1,10 @@
 #include <stdafx.h>
 #include <rsmgptDefns.h>
 #include <rsmgptCamera.h>
+#include <rsmgptModel.h>
 #include <iostream>
 #include <numeric>
+#include <DXSampleHelper.h>
 
 #include <bvh.h>
 
@@ -355,11 +357,83 @@ bool triangleIntersectV2( const Ray& ray, const Triangle& tri, float& t, float& 
 
 int main( int argc, char *argv[] )
 {
+    // Enable the D3D12 debug layer if in debug mode.
+    UINT d3d11DeviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    D2D1_FACTORY_OPTIONS d2dFactoryOptions = {};
+#if defined(_DEBUG)
+
+    // Enable the D3D11 debug layer.
+    d3d11DeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+
+    {
+        ComPtr<ID3D12Debug> debugController;
+        if( SUCCEEDED( D3D12GetDebugInterface( IID_PPV_ARGS( &debugController ) ) ) )
+        {
+            debugController->EnableDebugLayer();
+        }
+    }
+#endif
+
+    // Create a DXGIFactory and D3D12Device.
+    ComPtr<IDXGIFactory4> factory;
+    ThrowIfFailed( CreateDXGIFactory1( IID_PPV_ARGS( &factory ) ) );
+
+    // NOTE: Uncomment to enable the WARP device.
+    bool m_useWarpDevice = false;
+    ComPtr<ID3D12Device> m_d3d12Device;
+
+    if( m_useWarpDevice )
+    {
+        ComPtr<IDXGIAdapter> warpAdapter;
+        ThrowIfFailed( factory->EnumWarpAdapter( IID_PPV_ARGS( &warpAdapter ) ) );
+
+        ThrowIfFailed(
+            D3D12CreateDevice(
+                warpAdapter.Get(),
+                D3D_FEATURE_LEVEL_11_0,
+                IID_PPV_ARGS( &m_d3d12Device )
+                ) );
+    }
+    else
+    {
+        ThrowIfFailed(
+            D3D12CreateDevice(
+                nullptr,                    // Video adapter. nullptr implies the default adapter.
+                D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
+                IID_PPV_ARGS( &m_d3d12Device )   // D3D device object.
+                ) );
+    }
+
+    // Create the render and compute command queues that we will be using.
+    ComPtr<ID3D12CommandQueue> m_commandQueue;
+    D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+    queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    ThrowIfFailed( m_d3d12Device->CreateCommandQueue( &queueDesc, IID_PPV_ARGS( &m_commandQueue ) ) );
+
+    ComPtr<ID3D12CommandAllocator> m_commandAllocator;
+    ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &m_commandAllocator ) ) );
+
+    ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ThrowIfFailed(
+        m_d3d12Device->CreateCommandList(
+            0,                                          // GPU node (only 1 GPU for now)
+            D3D12_COMMAND_LIST_TYPE_DIRECT,             // Command list type
+            m_commandAllocator.Get(),  // Command allocator
+            nullptr,                      // Pipeline state
+            IID_PPV_ARGS( &m_commandList ) ) );         // Command list (output)
+
+    const path modelPath( "N:\\rsmgpt\\models\\spider.obj" );
+    Model model( modelPath, m_d3d12Device.Get(), m_commandList.Get(), "hlbvh", Mat4::Identity );
+
     // Test ray intersection with the spider model.
     Ray ray(
-        Point3(0, 17.25, -250),    // Origin
-        Vec3(-0.175084, -0.040588, 0.983716)       // Direction
+        Point3( 0, 17.25, -250 ),    // Origin
+        Vec3( -0.175084, -0.040588, 0.983716 )       // Direction
         );
+    float t, b1, b2;
+    Primitive hitPrim;
+    bool hit = model.accel()->IntersectStacklessP( model.vertexList(), ray, hitPrim, t, b1, b2 );
 
 #if 0
     Bounds3f box(
