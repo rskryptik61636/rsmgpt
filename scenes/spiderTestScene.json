@@ -13,7 +13,7 @@
 		"far_plane"			: 1000.0,
 		"motion_factor"		: 0.75,
 		"rotation_factor"	: 0.05,
-		"eye"				: [0, 0, -250],
+		"eye"				: [-225, 37, 20],
 		"look_at"			: [0, 0, 0],
 		"up"				: [0, 1, 0]
 	},
