@@ -919,6 +919,7 @@ namespace rsmgpt
                 ) );
         }
 
+#ifdef GENERATE_DEBUG_INFO
         // Create the debug info default and readback resources.
         {
             createCommittedDefaultBuffer(
@@ -933,6 +934,7 @@ namespace rsmgpt
                 m_debugInfoReadback,
                 sizeof( DebugInfo ) );
         }
+#endif // GENERATE_DEBUG_INFO
 
 #pragma endregion PathTracerOutput
 
@@ -986,6 +988,7 @@ namespace rsmgpt
             pathTracerOutputUavDesc.Texture2D.PlaneSlice = 0;
             m_pCsuHeap->addUAV( m_pathTracerOutput.Get(), &pathTracerOutputUavDesc, "gOutput" );
 
+#ifdef GENERATE_DEBUG_INFO
             // Create the UAV to the path tracer output.
             D3D12_UNORDERED_ACCESS_VIEW_DESC debugInfoUavDesc = {};
             debugInfoUavDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -994,12 +997,8 @@ namespace rsmgpt
             debugInfoUavDesc.Buffer.NumElements = 1;
             debugInfoUavDesc.Buffer.StructureByteStride = sizeof( DebugInfo );
             m_pCsuHeap->addUAV( m_debugInfoDefault.Get(), &debugInfoUavDesc, "gDebugInfo" );
-
-            /*D3D12_UNORDERED_ACCESS_VIEW_DESC nodesDesc( debugInfoUavDesc );
-            nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
-            nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
-            m_pCsuHeap->addUAV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );*/
-
+#endif // GENERATE_DEBUG_INFO
+            
             // Create the SRV to the path tracer output.
             D3D12_SHADER_RESOURCE_VIEW_DESC pathTracerOutputSrvDesc = {};
             pathTracerOutputSrvDesc.Format = pathTracerOutputFormat;
@@ -1530,14 +1529,16 @@ namespace rsmgpt
             PTComputeUavTable,
             m_pCsuHeap->getGPUHandle( "gOutput" ) );    // Set the UAV table.
 
-        // Transition the debug info resource from copy source state to unordered access.
+#ifdef GENERATE_DEBUG_INFO
+                        // Transition the debug info resource from copy source state to unordered access.
         D3D12_RESOURCE_BARRIER debugInfoBarrier =
             CD3DX12_RESOURCE_BARRIER::Transition(
                 m_debugInfoDefault.Get(),
                 D3D12_RESOURCE_STATE_COPY_SOURCE,
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS );
         m_computeCommandList->ResourceBarrier( 1, &debugInfoBarrier );
-
+#endif // GENERATE_DEBUG_INFO
+        
         // Dispatch enough thread groups to cover the entire screen.
         m_computeCommandList->Dispatch(
             m_width / m_computeBlockSize,
@@ -1554,14 +1555,16 @@ namespace rsmgpt
             m_timestampResultBuffer.Get(),
             timestampHeapIndex * sizeof( UINT64 ) );
 
+#ifdef GENERATE_DEBUG_INFO
         // Transition the debug info resource from unordered access to generic read state.
         debugInfoBarrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        debugInfoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+            debugInfoBarrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
         m_computeCommandList->ResourceBarrier( 1, &debugInfoBarrier );
 
         // Copy the debug info from the default to the readback resource.
         // TODO: This needs to happen on a separate copy queue.
         m_computeCommandList->CopyResource( m_debugInfoReadback.Get(), m_debugInfoDefault.Get() );
+#endif // GENERATE_DEBUG_INFO
 
         // Close the compute command list and execute the compute work.
         ThrowIfFailed( m_computeCommandList->Close() );

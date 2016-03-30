@@ -32,7 +32,7 @@
 
 #include <functional>
 
-// Define this to generate debug info which can be read back from the path tracing shader.
+// Uncomment this to generate debug info which can be read back from the path tracing shader.
 //#define GENERATE_DEBUG_INFO
 
 namespace rsmgpt {
@@ -218,11 +218,11 @@ namespace rsmgpt {
         ComPtr<IDWriteTextFormat> m_textFormat;
         ComPtr<ID3D12Resource> m_vertexBuffer;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-        /*ComPtr<ID3D12Resource> m_boundsIndexBuffer;
-        D3D12_INDEX_BUFFER_VIEW m_boundsIndexBufferView;*/
         ComPtr<ID3D12Resource> m_constantBuffer;
+#ifdef GENERATE_DEBUG_INFO
         ComPtr<ID3D12Resource> m_debugInfoDefault;
         ComPtr<ID3D12Resource> m_debugInfoReadback;
+#endif // GENERATE_DEBUG_INFO
         ComPtr<ID3D12Resource> m_depthStencil;
         ComPtr<ID3D12Resource> m_pathTracerOutput;
         ComPtr<ID3D12QueryHeap> m_timestampQueryHeap;
