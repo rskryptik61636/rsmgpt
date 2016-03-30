@@ -347,7 +347,7 @@ BVHAccel::BVHAccel(
     /*treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
                  primitives.size() * sizeof(primitives[0]);*/   // TODO: treeBytes needs to be in thread local storage.
     nodes = AllocAligned<LinearBVHNode>(totalNodes);
-    ::memset( nodes, 0, totalNodes * sizeof( LinearBVHNode ) );
+    //::memset( nodes, 0, totalNodes * sizeof( LinearBVHNode ) );
     int offset = 0, parentOffset = 0;
     flattenBVHTree(parentOffset, root, &offset);
     assert(offset == totalNodes);
@@ -798,6 +798,9 @@ int BVHAccel::flattenBVHTree(const int parentOffset, BVHBuildNode *node, int *of
         linearNode->primitivesOffset = node->firstPrimOffset;
         linearNode->nPrimitives = node->nPrimitives;
     } else {
+        // Save the left child offset.
+        const int leftOffset = *offset;
+        
         // Create interior flattened BVH node
         linearNode->axis = node->splitAxis;
         linearNode->nPrimitives = 0;
@@ -806,8 +809,8 @@ int BVHAccel::flattenBVHTree(const int parentOffset, BVHBuildNode *node, int *of
             flattenBVHTree(myOffset, node->children[1], offset);
 
         // Set the sibling offsets for the child nodes.
-        nodes[ *offset ].siblingOffset = linearNode->secondChildOffset;
-        nodes[ linearNode->secondChildOffset ].siblingOffset = *offset;
+        nodes[ leftOffset ].siblingOffset = linearNode->secondChildOffset;
+        nodes[ linearNode->secondChildOffset ].siblingOffset = leftOffset;
     }
     return myOffset;
 }
@@ -973,15 +976,16 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
                 if( leftBoxt < rightBoxt )
                 {
                     nodeId = leftChildIndx;
-                    siblingId = rightChildIndx;
-                    nodes[ nodeId ].siblingOffset = rightChildIndx;
+                    //siblingId = rightChildIndx;
+                    //nodes[ nodeId ].siblingOffset = rightChildIndx;
                 }
                 else
                 {
                     nodeId = rightChildIndx;
-                    siblingId = leftChildIndx;
-                    nodes[ nodeId ].siblingOffset = leftChildIndx;
+                    //siblingId = leftChildIndx;
+                    //nodes[ nodeId ].siblingOffset = leftChildIndx;
                 }
+                siblingId = nodes[ nodeId ].siblingOffset;
 
                 // Set the lowest bit of the bitstack to 1 to indicate that the near child has been traversed.
                 bitstack |= 1;
@@ -995,16 +999,16 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
                 if( leftHit )
                 {
                     nodeId = leftChildIndx;
-                    siblingId = rightChildIndx;
-                    nodes[ nodeId ].siblingOffset = rightChildIndx;
+                    /*siblingId = rightChildIndx;
+                    nodes[ nodeId ].siblingOffset = rightChildIndx;*/
                 }
                 else
                 {
                     nodeId = rightChildIndx;
-                    siblingId = leftChildIndx;
-                    nodes[ nodeId ].siblingOffset = leftChildIndx;
+                    /*siblingId = leftChildIndx;
+                    nodes[ nodeId ].siblingOffset = leftChildIndx;*/
                 }
-                
+                siblingId = nodes[ nodeId ].siblingOffset;                
             }
         }
         // Leaf node

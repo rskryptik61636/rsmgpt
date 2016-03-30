@@ -498,11 +498,11 @@ namespace rsmgpt
             m_computeRootSignature[ PTCbvCbPerFrame ].InitAsConstantBufferView( 0 );
 
             // The second compute root parameter is a table to the model vertex buffer, primitive and BVH node array SRVs.
-            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0 );
+            CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, PTComputeSrvTableRange, 0 );
             m_computeRootSignature[ PTComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
 
             // The third compute root parameter is a table to the render output UAVs.
-            CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, 0 );
+            CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, PTComputeUavTableRange, 0 );
             m_computeRootSignature[ PTComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
             m_computeRootSignature.finalize( m_d3d12Device.Get() );
         }
@@ -547,12 +547,16 @@ namespace rsmgpt
 
 #pragma region Resources
 
+#pragma region DescriptorHeaps
         // Create descriptor heaps.
         {
             m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, m_frameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
             m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
             m_pCsuHeap.reset( new CsuDescriptorHeap( m_d3d12Device, PTCbvSrvUavDescriptorCountPerFrame, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
         }
+#pragma endregion DescriptorHeaps
+
+#pragma region TimestampHeap
 
         // Create query heaps and result buffers.
         {
@@ -574,6 +578,10 @@ namespace rsmgpt
                 ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
             }
         }
+
+#pragma endregion TimestampHeap
+
+#pragma region FrameResources
 
         // Create frame resources.
         {
@@ -619,6 +627,10 @@ namespace rsmgpt
             }
         }
 
+#pragma endregion FrameResources
+
+#pragma region TextRenderer
+
         // Create D2D/DWrite objects for rendering text.
         {
             std::wstring_convert<std::codecvt_utf8<wchar_t>> myconv;
@@ -641,6 +653,10 @@ namespace rsmgpt
             ThrowIfFailed( m_textFormat->SetParagraphAlignment( DWRITE_PARAGRAPH_ALIGNMENT_NEAR ) );
         }
 
+#pragma endregion TextRenderer
+
+#pragma region CommandLists
+
         // Create the graphics and compute command lists.
         ThrowIfFailed(
             m_d3d12Device->CreateCommandList(
@@ -660,9 +676,13 @@ namespace rsmgpt
 
         ThrowIfFailed( m_computeCommandList->Close() );
 
+#pragma endregion CommandLists
+
+#pragma region FullScreenTriangle
+
         ComPtr<ID3D12Resource> vertexBufferUpload;
         ComPtr<ID3D12Resource> commandBufferUpload;
-
+        
         // Create the vertex buffer.
         {
             // Define the geometry for a full screen triangle as given here: https://www.reddit.com/r/gamedev/comments/2j17wk/a_slightly_faster_bufferless_vertex_shader_trick/
@@ -726,6 +746,10 @@ namespace rsmgpt
             m_vertexBufferView.SizeInBytes = vertexBufferSize;
         }
 
+#pragma endregion FullScreenTriangle
+
+#pragma region DepthStencilView
+
         // Create the depth stencil view. (TODO: See if we can do way with this.)
         {
             D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
@@ -758,10 +782,11 @@ namespace rsmgpt
             m_pDsvHeap->addDSV( m_depthStencil.Get(), &depthStencilDesc, "dsv" );
         }
 
-        // TODO: Test variable to easily switch between the cube and spider models. Remove once we are able to read params from an XML file.
-        const bool isSpider = true;
+#pragma endregion DepthStencilView
 
-        // Create the constant buffers.
+#pragma region Camera
+
+        // Create the camera and constant buffer.
         {
             // We're dealing with only one constant buffer per frame.
             const UINT constantBufferDataSize = /*m_frameCount **/ sizeof( PTCbPerFrame );
@@ -824,10 +849,14 @@ namespace rsmgpt
 
         }
 
+#pragma endregion Camera
+
+#pragma region Models
+
         // Load the test model.
         {
             const auto& modelsConfig = m_configRoot[ "models" ];
-            m_modelWorldTransform = /*isSpider ? Mat4::CreateRotationY( -0.5 * XM_PI ) :*/ Mat4::Identity;
+            m_modelWorldTransform = Mat4::Identity;
             
             const path 
                 modelsRoot( m_configRoot[ "models_dir" ].asString() ),
@@ -865,6 +894,10 @@ namespace rsmgpt
 //        }
 //#endif  // _DEBUG
 
+#pragma endregion Models
+
+#pragma region PathTracerOutput
+
         const auto pathTracerOutputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         {
             // Create the path tracer output texture.
@@ -900,6 +933,8 @@ namespace rsmgpt
                 m_debugInfoReadback,
                 sizeof( DebugInfo ) );
         }
+
+#pragma endregion PathTracerOutput
 
 #pragma endregion Resources
 
@@ -938,10 +973,10 @@ namespace rsmgpt
             primDesc.Buffer.StructureByteStride = m_pModel->accel()->primitiveSize();
             m_pCsuHeap->addSRV( m_pModel->accel()->primitivesResource(), &primDesc, "gPrimitives" );
 
-            /*D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
+            D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
             nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
             nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
-            m_pCsuHeap->addSRV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );*/
+            m_pCsuHeap->addSRV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
 
             // Create the UAV to the path tracer output.
             D3D12_UNORDERED_ACCESS_VIEW_DESC pathTracerOutputUavDesc = {};
@@ -960,10 +995,10 @@ namespace rsmgpt
             debugInfoUavDesc.Buffer.StructureByteStride = sizeof( DebugInfo );
             m_pCsuHeap->addUAV( m_debugInfoDefault.Get(), &debugInfoUavDesc, "gDebugInfo" );
 
-            D3D12_UNORDERED_ACCESS_VIEW_DESC nodesDesc( debugInfoUavDesc );
+            /*D3D12_UNORDERED_ACCESS_VIEW_DESC nodesDesc( debugInfoUavDesc );
             nodesDesc.Buffer.NumElements = static_cast<UINT>( m_pModel->accel()->nBVHNodes() );
             nodesDesc.Buffer.StructureByteStride = m_pModel->accel()->nodeSize();
-            m_pCsuHeap->addUAV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
+            m_pCsuHeap->addUAV( m_pModel->accel()->nodesResource(), &nodesDesc, "gBVHNodes" );*/
 
             // Create the SRV to the path tracer output.
             D3D12_SHADER_RESOURCE_VIEW_DESC pathTracerOutputSrvDesc = {};

@@ -57,7 +57,7 @@ using namespace rsmgpt;
 //_Use_decl_annotations_
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR cmdLine, int nCmdShow)
 {
-	Engine pathTracer(cmdLine, Engine::/*OM_PATH_TRACER*/OM_DEBUG_ACCEL);
+	Engine pathTracer(cmdLine, Engine::OM_PATH_TRACER/*OM_DEBUG_ACCEL*/);
     return pathTracer.Run( hInstance, nCmdShow );
     //return 0;
 }

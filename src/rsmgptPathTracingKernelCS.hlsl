@@ -40,15 +40,13 @@ StructuredBuffer<ModelVertex> gVertexBuffer : register( t0 );
 
 // Primitives and BVH node array.
 StructuredBuffer<Primitive> gPrimitives : register( t1 );
+StructuredBuffer<LinearBVHNode> gBVHNodes : register( t2 );
 
 // Path tracing output texture.
 RWTexture2D<float4> gOutput	: register( u0 );
 
 // Debug info.
 RWStructuredBuffer<DebugInfo> gDebugInfo : register( u1 );
-
-// BVH node array.
-RWStructuredBuffer<LinearBVHNode> gBVHNodes : register( u2 );
 
 // Ray's tMax and time.
 static const float tMax = 10000000;
@@ -281,22 +279,24 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
         // Inner node loop
         while( isInner( nodeId ) )
         {
-            //// Check if the current node is hit.
-            //Bounds parentBox = transformBounds( gBVHNodes[ nodeId ].bounds, gWorld );
-            //if( !boxIntersect( ray, parentBox, invDir, dirIsNeg ) )
-            //    break;
-
-            //// Set the parentId to the current nodeId.
-            //parentId = nodeId;
-
             // Check if either of the children will be hit.
             const uint leftChildIndx = nodeId + 1;
             const uint rightChildIndx = gBVHNodes[ nodeId ].primitivesOrSecondChildOffset;
-            const Bounds leftBox = transformBounds( gBVHNodes[ leftChildIndx ].bounds, gWorld );
-            const Bounds rightBox = transformBounds( gBVHNodes[ rightChildIndx ].bounds, gWorld );
             float leftBoxt, rightBoxt;
-            const bool leftHit = boxIntersect( ray, leftBox, invDir, dirIsNeg, leftBoxt );
-            const bool rightHit = boxIntersect( ray, rightBox, invDir, dirIsNeg, rightBoxt );
+            const bool leftHit = 
+                boxIntersect( 
+                    ray, 
+                    gBVHNodes[ leftChildIndx ].bounds,
+                    invDir, 
+                    dirIsNeg, 
+                    leftBoxt );
+            const bool rightHit = 
+                boxIntersect( 
+                    ray, 
+                    gBVHNodes[ rightChildIndx ].bounds,
+                    invDir, 
+                    dirIsNeg, 
+                    rightBoxt );
 
             // Terminate this loop if neither of the children were hit.
             if( !leftHit && !rightHit )
@@ -312,14 +312,12 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
                 if( leftBoxt < rightBoxt )
                 {
                     nodeId = leftChildIndx;
-                    siblingId = rightChildIndx;                    
                 }
                 else
                 {
                     nodeId = rightChildIndx;
-                    siblingId = leftChildIndx;
                 }
-                gBVHNodes[ nodeId ].siblingOffset = siblingId;
+                siblingId = gBVHNodes[ nodeId ].siblingOffset;
 
                 // Set the lowest bit of the bitstack to 1 to indicate that the near child has been traversed.
                 bitstack |= 1;
@@ -332,14 +330,12 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
                 if( leftHit )
                 {
                     nodeId = leftChildIndx;
-                    siblingId = rightChildIndx;                    
                 }
                 else
                 {
                     nodeId = rightChildIndx;
-                    siblingId = leftChildIndx;
                 }
-                gBVHNodes[ nodeId ].siblingOffset = siblingId;
+                siblingId = gBVHNodes[ nodeId ].siblingOffset;
             }
         }
         // Leaf node
@@ -352,9 +348,9 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
                 // Check if the i'th primitive is hit.
                 Primitive prim = gPrimitives[ gBVHNodes[ nodeId ].primitivesOrSecondChildOffset + i ];
                 Triangle tri = {
-                    mul( float4( gVertexBuffer[ prim.p0 ].position, 1.0 ), gWorld ).xyz,
-                    mul( float4( gVertexBuffer[ prim.p1 ].position, 1.0 ), gWorld ).xyz,
-                    mul( float4( gVertexBuffer[ prim.p2 ].position, 1.0 ), gWorld ).xyz };
+                    gVertexBuffer[ prim.p0 ].position,
+                    gVertexBuffer[ prim.p1 ].position,
+                    gVertexBuffer[ prim.p2 ].position };
                 if( triangleIntersectWithBackFaceCulling( ray, tri, t, b1, b2 ) )
                 {
                     // Increment the debug info's nTotalPrimIntersections.
@@ -448,7 +444,7 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
 }
 
 // NOTE: Hardcoding the thread groups dims for now, will be updated as necessary.
-#define TG_SIZE 16
+#define TG_SIZE 8
 //#define WIDTH 1280
 //#define HEIGHT 1024
 

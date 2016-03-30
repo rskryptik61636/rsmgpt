@@ -81,7 +81,7 @@ namespace rsmgpt {
 
         // Engine constants.
         static const UINT m_frameCount = 2;
-        static const UINT m_computeBlockSize = 16;
+        static const UINT m_computeBlockSize = 8;
 
         // Config file root node.
         Json::Value m_configRoot;
@@ -126,13 +126,20 @@ namespace rsmgpt {
             PTComputeRootParametersCount
         };
 
+        // Path tracing mode table ranges.
+        enum PTComputeRootTableRanges
+        {
+            PTComputeSrvTableRange = 3,
+            PTComputeUavTableRange = 2
+        };
+
         // Path tracing mode CBV/SRV/UAV desciptor heap offsets.
         enum PTHeapOffsets
         {
-            PTComputeCbvOffset = 0,                                       // Path tracing kernel constant buffer.
-            PTComputeSrvOffset = PTComputeCbvOffset + 1,                  // Path tracing kernel vertex buffer, primitive and BVH SRVs.
-            PTComputeUavOffset = PTComputeSrvOffset + 2,                  // Path tracing kernel render output UAV.
-            PTGfxSrvOffset = PTComputeUavOffset + 3,                      // Path tracing kernel render output SRV (used to finally display the rendered output).
+            PTComputeCbvOffset = 0,                                             // Path tracing kernel constant buffer.
+            PTComputeSrvOffset = PTComputeCbvOffset + 1,                        // Path tracing kernel vertex buffer, primitive and BVH SRVs.
+            PTComputeUavOffset = PTComputeSrvOffset + PTComputeSrvTableRange,   // Path tracing kernel render output UAV.
+            PTGfxSrvOffset = PTComputeUavOffset + PTComputeUavTableRange,       // Path tracing kernel render output SRV (used to finally display the rendered output).
             PTCbvSrvUavDescriptorCountPerFrame = PTGfxSrvOffset + 1
         };
 
