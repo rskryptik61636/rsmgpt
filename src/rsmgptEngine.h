@@ -27,6 +27,7 @@
 #include "rsmgptResourceBinding.h"
 #include "rsmgptCamera.h"
 #include "rsmgptModel.h"
+#include "rsmgptGpuTimer.h"
 
 #include <json/json.h>
 
@@ -165,8 +166,7 @@ namespace rsmgpt {
         // Debug info.
         DebugInfo m_debugInfo;
 #endif // GENERATE_DEBUG_INFO
-
-
+        
         // Each triangle gets its own constant buffer per frame.
         std::vector<PTCbPerFrame> m_constantBufferData;
         UINT8* m_pCbvDataBegin;
@@ -237,6 +237,9 @@ namespace rsmgpt {
         // Camera objects.
         PTPerspectiveCameraPtr m_pPTPersepectiveCamera;
         DebugPerspectiveCameraPtr m_pDebugPerspectiveCamera;
+
+        // GPU timer.
+        GpuTimerPtr m_gpuTimer;
 
         // Asset paths.
         path m_shadersDir;

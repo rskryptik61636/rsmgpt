@@ -224,37 +224,8 @@ namespace rsmgpt
         // Compute the time spent in the path tracing pass.
         {
             // The oldest frame is the one that was previously rendered.
-            const UINT oldestFrameIndex = ( m_frameIndex + 1 ) % m_frameCount;// , completedFenceValue = m_fence->GetCompletedValue();
-            
-            // The oldest frame is the current frame index and it will always be complete due to the wait in moveToNextFrame().
-            //assert( m_fenceValues[ oldestFrameIndex ] <= m_fence->GetCompletedValue() );
-
-            // Get the timestamp values from the result buffers.
-            D3D12_RANGE readRange = {};
-            const D3D12_RANGE emptyRange = {};
-
-            //UINT64* ppMovingAverage[] = { m_drawTimes, m_blurTimes };
-            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
-            {
-                readRange.Begin = 2 * oldestFrameIndex * sizeof( UINT64 );
-                readRange.End = readRange.Begin + 2 * sizeof( UINT64 );
-
-                void* pData = nullptr;
-                ThrowIfFailed( m_timestampResultBuffer->Map( 0, &readRange, &pData ) );
-
-                const UINT64* pTimestamps = reinterpret_cast<UINT64*>( static_cast<UINT8*>( pData ) + readRange.Begin );
-                const UINT64 timeStampDelta = pTimestamps[ 1 ] - pTimestamps[ 0 ];
-
-                // Unmap with an empty range (written range).
-                m_timestampResultBuffer->Unmap( 0, &emptyRange );
-
-                // Calculate the GPU execution time in microseconds.
-                m_pathTracingTime = ( timeStampDelta * 1000000 ) / m_computeCommandQueueTimestampFrequency;
-                //ppMovingAverage[ i ][ m_currentTimesIndex ] = gpuTimeUS;
-            }
-
-            // Move to the next index.
-            //m_currentTimesIndex = ( m_currentTimesIndex + 1 ) % MovingAverageFrameCount;
+            const UINT oldestFrameIndex = ( m_frameIndex + 1 ) % m_frameCount;
+            m_pathTracingTime = m_gpuTimer->getTimeSpanInMs( oldestFrameIndex, "pathTracer" );
         }
 
 		// TODO: Add implementation here.
@@ -385,9 +356,9 @@ namespace rsmgpt
         computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
         ThrowIfFailed( m_d3d12Device->CreateCommandQueue( &computeQueueDesc, IID_PPV_ARGS( &m_computeCommandQueue ) ) );
 
-        // Get the timestamp frequency of the compute command queue.
-        //ThrowIfFailed( m_d3d12Device->SetStablePowerState( TRUE ) );  // TODO: Check if this actually makes a difference with timestamps in the same command list.
-        ThrowIfFailed( m_computeCommandQueue->GetTimestampFrequency( &m_computeCommandQueueTimestampFrequency ) );
+        //// Get the timestamp frequency of the compute command queue.
+        ////ThrowIfFailed( m_d3d12Device->SetStablePowerState( TRUE ) );  // TODO: Check if this actually makes a difference with timestamps in the same command list.
+        //ThrowIfFailed( m_computeCommandQueue->GetTimestampFrequency( &m_computeCommandQueueTimestampFrequency ) );
 
         // Describe and create the swap chain.
         DXGI_SWAP_CHAIN_DESC swapChainDesc = {};
@@ -558,26 +529,13 @@ namespace rsmgpt
 
 #pragma region TimestampHeap
 
-        // Create query heaps and result buffers.
-        {
-            // Two timestamps for each frame.
-            const UINT resultCount = 2 * m_frameCount;
-            const UINT resultBufferSize = resultCount * sizeof( UINT64 );
-
-            D3D12_QUERY_HEAP_DESC timestampHeapDesc = {};
-            timestampHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-            timestampHeapDesc.Count = resultCount;
-
-            //for( UINT i = 0; i < GraphicsAdaptersCount; i++ )
-            {
-                createCommittedReadbackBuffer(
-                    m_d3d12Device.Get(),
-                    m_timestampResultBuffer,
-                    resultBufferSize );
-
-                ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
-            }
-        }
+        // Initialize the GPU timer.
+        m_gpuTimer.reset(
+            new GpuTimer(
+                m_frameCount,
+                { "pathTracer" },
+                m_d3d12Device.Get(),
+                m_computeCommandQueue.Get() ) );
 
 #pragma endregion TimestampHeap
 
@@ -1177,25 +1135,13 @@ namespace rsmgpt
             m_pDsvHeap.reset( new DsvDescriptorHeap( m_d3d12Device, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
         }
 
-        // Create query heaps and result buffers.
-        {
-            // Two timestamps for each frame.
-            const UINT resultCount = 2 * m_frameCount;
-            const UINT resultBufferSize = resultCount * sizeof( UINT64 );
-
-            D3D12_QUERY_HEAP_DESC timestampHeapDesc = {};
-            timestampHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-            timestampHeapDesc.Count = resultCount;
-
-            {
-                createCommittedReadbackBuffer(
-                    m_d3d12Device.Get(),
-                    m_timestampResultBuffer,
-                    resultBufferSize );
-
-                ThrowIfFailed( m_d3d12Device->CreateQueryHeap( &timestampHeapDesc, IID_PPV_ARGS( &m_timestampQueryHeap ) ) );
-            }
-        }
+        // Initialize the GPU timer.
+        m_gpuTimer.reset(
+            new GpuTimer(
+                m_frameCount,
+                { "pathTracer" },
+                m_d3d12Device.Get(),
+                m_computeCommandQueue.Get() ) );
 
         // Create frame resources.
         {
@@ -1493,8 +1439,7 @@ namespace rsmgpt
         ThrowIfFailed( m_commandList->Reset( m_commandAllocators[ m_frameIndex ].Get(), m_fullScreenTri3DPSO.Get() ) );
 
         // Get a timestamp at the start of the compute command list.
-        const UINT timestampHeapIndex = 2 * m_frameIndex;
-        m_computeCommandList->EndQuery( m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, timestampHeapIndex );
+        m_gpuTimer->startTimer( m_frameIndex, "pathTracer", m_computeCommandList.Get() );
 
         // Set the compute root signature.
         m_computeCommandList->SetComputeRootSignature( m_computeRootSignature.get() );
@@ -1546,14 +1491,7 @@ namespace rsmgpt
             1 );
 
         // Get a timestamp at the end of the compute command list and resolve the query data.
-        m_computeCommandList->EndQuery( m_timestampQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, timestampHeapIndex + 1 );
-        m_computeCommandList->ResolveQueryData(
-            m_timestampQueryHeap.Get(),
-            D3D12_QUERY_TYPE_TIMESTAMP,
-            timestampHeapIndex,
-            2,
-            m_timestampResultBuffer.Get(),
-            timestampHeapIndex * sizeof( UINT64 ) );
+        m_gpuTimer->stopTimer( m_frameIndex, "pathTracer", m_computeCommandList.Get() );
 
 #ifdef GENERATE_DEBUG_INFO
         // Transition the debug info resource from unordered access to generic read state.

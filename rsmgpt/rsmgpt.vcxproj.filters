@@ -57,6 +57,9 @@
     <ClInclude Include="..\src\rsmgptResources.h">
       <Filter>Source</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\rsmgptGpuTimer.h">
+      <Filter>Source</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\bvh.cpp">
@@ -84,6 +87,9 @@
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="..\src\jsoncpp.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\rsmgptGpuTimer.cpp">
       <Filter>Source</Filter>
     </ClCompile>
   </ItemGroup>

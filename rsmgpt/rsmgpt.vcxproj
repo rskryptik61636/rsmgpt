@@ -175,6 +175,7 @@
     <ClInclude Include="..\src\rsmgptDefns.h" />
     <ClInclude Include="..\src\rsmgptEngine.h" />
     <ClInclude Include="..\src\rsmgptGeometry.h" />
+    <ClInclude Include="..\src\rsmgptGpuTimer.h" />
     <ClInclude Include="..\src\rsmgptModel.h" />
     <ClInclude Include="..\src\rsmgptPipelineState.h" />
     <ClInclude Include="..\src\rsmgptResourceBinding.h" />
@@ -187,6 +188,7 @@
     <ClCompile Include="..\src\memory.cpp" />
     <ClCompile Include="..\src\rsmgptCamera.cpp" />
     <ClCompile Include="..\src\rsmgptEngine.cpp" />
+    <ClCompile Include="..\src\rsmgptGpuTimer.cpp" />
     <ClCompile Include="..\src\rsmgptModel.cpp" />
     <ClCompile Include="..\src\rsmgptResourceBinding.cpp" />
     <ClCompile Include="..\src\rsmgptResources.cpp" />

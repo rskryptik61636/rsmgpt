@@ -35,11 +35,15 @@
 #include <vector>
 #include <filesystem>
 #include <array>
+#include <map>
 
 #include <wrl.h>
 
 namespace rsmgpt
 {
+
+#define MAKE_DEFAULT_CTOR(Type) Type() = default;
+
     // Math typedefs.
     namespace Math = DirectX::SimpleMath;
     typedef Math::Vector2 Vec2;
