@@ -3,8 +3,6 @@
 rsmgpt is an attempt to educate myself about both GPU path tracing as well as D3D12 in one go. 
 Progress will be documented on my blog: http://mkrohitshrinath.blogspot.com/
 
-#### IMPORTANT: THE RELEASE BUILD IS CURRENTLY BROKEN! PLEASE RUN ONLY THE DEBUG BUILD! ####
-
 Pre-requisites:
 
 1. Windows 10: rsmgpt is written using D3D12 which is currently supported only on Windows 10.
