@@ -27,3 +27,5 @@ Building and using DirectXTK:
 1. Pull down rsmgpt from the Github repository: https://github.com/rskryptik61636/rsmgpt
 
 2. Run rsmgpt.cmd after fulfilling all the pre-requisites and build the solution.
+
+NOTE: The models described in my blog have not been provided in this repository. The spider model is bundled with the Assimp project. I will provide information on where the freely available models I'm using can be found as much as possible.
