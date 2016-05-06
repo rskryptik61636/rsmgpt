@@ -931,7 +931,7 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
     const Vec3 invDir = Vec3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
     const int dirIsNeg[] = { invDir.x < 0, invDir.y < 0, invDir.z < 0 };
     UINT nodeId = 0, junk, hitPrimIndx;
-    UINT bitstack = 0;
+    UINT bitstack = 0, treeLevel = 0;
     UINT /*parentId = 0,*/ siblingId = 0; // cached node links
     const float oritMax = ray.tMax;
     float tMin = ray.tMax, b1Hit, b2Hit;
@@ -943,14 +943,6 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
         // Inner node loop
         while( nodes[ nodeId ].nPrimitives == 0 )
         {
-            //// Check if the current node is hit.
-            //Bounds3f parentBox = transformBounds( nodes[ nodeId ].bounds, gWorld );
-            //if( !boxIntersect( ray, parentBox, invDir, dirIsNeg ) )
-            //    break;
-
-            //// Set the parentId to the current nodeId.
-            //parentId = nodeId;
-
             // Check if either of the children will be hit.
             const UINT leftChildIndx = nodeId + 1;
             const UINT rightChildIndx = nodes[ nodeId ].secondChildOffset;
@@ -970,20 +962,14 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
             // If both children are hit, set nodeId to that of the left child.
             if( leftHit && rightHit )
             {
-                //nodeId = ( leftBoxt < rightBoxt ) ? leftChildIndx : rightChildIndx; //( near1 < near0 ) ? nid.w : nid.z;
-
                 // Set nodeId to that of the nearest child node.
                 if( leftBoxt < rightBoxt )
                 {
                     nodeId = leftChildIndx;
-                    //siblingId = rightChildIndx;
-                    //nodes[ nodeId ].siblingOffset = rightChildIndx;
                 }
                 else
                 {
                     nodeId = rightChildIndx;
-                    //siblingId = leftChildIndx;
-                    //nodes[ nodeId ].siblingOffset = leftChildIndx;
                 }
                 siblingId = nodes[ nodeId ].siblingOffset;
 
@@ -992,24 +978,20 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
             }
             else
             {
-                //nodeId = hit0 ? nid.z : nid.w;
-
                 // Set nodeId to that of the intersected child.
-                //nodeId = leftHit ? leftChildIndx : rightChildIndx;
                 if( leftHit )
                 {
                     nodeId = leftChildIndx;
-                    /*siblingId = rightChildIndx;
-                    nodes[ nodeId ].siblingOffset = rightChildIndx;*/
                 }
                 else
                 {
                     nodeId = rightChildIndx;
-                    /*siblingId = leftChildIndx;
-                    nodes[ nodeId ].siblingOffset = leftChildIndx;*/
                 }
                 siblingId = nodes[ nodeId ].siblingOffset;                
             }
+
+            // Moving to the next level of the tree.
+            ++treeLevel;
         }
         // Leaf node
         if( nodes[ nodeId ].nPrimitives > 0 )
@@ -1019,12 +1001,6 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
             for( UINT i = 0; i < nodes[ nodeId ].nPrimitives; ++i )
             {
                 // Check if the i'th primitive is hit.
-                //Primitive prim = primitives[ nodes[ nodeId ].primitivesOffset + i ];
-                /*Triangle tri = {
-                    mul( float4( gVertexBuffer[ prim.p0 ].position, 1.0 ), gWorld ).xyz,
-                    mul( float4( gVertexBuffer[ prim.p1 ].position, 1.0 ), gWorld ).xyz,
-                    mul( float4( gVertexBuffer[ prim.p2 ].position, 1.0 ), gWorld ).xyz };*/
-                //if( triangleIntersectWithBackFaceCulling( ray, tri, t, b1, b2 ) )
                 if( primitives[ nodes[ nodeId ].primitivesOffset + i ].IntersectP( vertexList, ray, t, b1, b2 ) )
                 {
                     // Set tMin to t if it is lesser. This is to ensure that the closest primitive is hit.
@@ -1050,10 +1026,13 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
                 break;
             }
 
+            // Moving to the previous level of the tree.
+            --treeLevel;
+
             // Set the current nodeId to that of the parent of current node.
             nodeId = nodes[ nodeId ].parentOffset;
             siblingId = nodes[ nodeId ].siblingOffset;
-            bitstack >>= 1;
+            bitstack >>= 1;            
         }
 
         // End the traversal if necessary.

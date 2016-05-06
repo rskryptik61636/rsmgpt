@@ -106,8 +106,8 @@ public:
 
     // Ray Public Data
     Point3 o;
-    Vec3 d;
     mutable float tMax;
+    Vec3 d;
     float time;
     //const Medium *medium;
 };
@@ -331,6 +331,7 @@ typedef std::vector<Primitive> PrimitiveList;
 struct DebugInfo
 {
     Ray ray;
+    bool hitSomething;
     Primitive hitPrim;
     UINT nTraversedBounds;
     UINT nTotalPrimIntersections;
@@ -345,6 +346,27 @@ struct DebugBounds
     UINT pad2;
 
     Mat4 viewProj;
+};
+
+enum AccelTraversal
+{
+    AT_HIT_LEFT,
+    AT_HIT_RIGHT,
+    AT_HIT_LEFT_ONLY,
+    AT_HIT_RIGHT_ONLY,
+    AT_HIT_PRIMITIVE,
+    AT_BACKTRACK
+};
+
+struct AccelDebug
+{
+    UINT treeLevel;
+    AccelTraversal accelTraversal;
+    UINT nodeId;
+    UINT siblingId;
+    UINT bitstack;
+    UINT hitPrimId;
+    float tMin;
 };
 
 // BVHAccel Declarations

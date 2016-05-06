@@ -38,8 +38,8 @@ struct PS_IN
 struct Ray
 {
     float3 o;   // Ray origin.
-    float3 d;   // Ray direction.
     float tMax; // Ray max intersection parameter.
+    float3 d;   // Ray direction.
     float time; // Unused for now, but will eventually be used for animation effects.
 };
 
@@ -134,9 +134,32 @@ uint axis( in LinearBVHNode node )
 struct DebugInfo
 {
     Ray ray;
+    bool hitSomething;
     Primitive hitPrim;
     uint nTraversedBounds;
     uint nTotalPrimIntersections;
+};
+
+// AccelTraversal is an enum on the CPU side.
+//enum AccelTraversal
+//{
+//    AT_HIT_LEFT,
+//    AT_HIT_RIGHT,
+//    AT_HIT_LEFT_ONLY,
+//    AT_HIT_RIGHT_ONLY,
+//    AT_HIT_PRIMITIVE,
+//    AT_BACKTRACK
+//};
+
+struct AccelDebug
+{
+    uint treeLevel;
+    uint accelTraversal;
+    uint nodeId;
+    uint siblingId;
+    uint bitstack;
+    uint hitPrimId;
+    float tMin;
 };
 
 #define MachineEpsilon 1e-10 * 0.5

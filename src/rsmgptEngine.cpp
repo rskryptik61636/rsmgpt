@@ -28,6 +28,7 @@
 #include "rsmgptEngine.h"
 #include "rsmgptGlobals.h"
 #include "rsmgptResources.h"
+#include "rsmgptStringUtils.h"
 
 // Include shader headers.
 #include <rsmgptPathTracingKernelCS.h>
@@ -53,6 +54,9 @@ namespace rsmgpt
         yBlock( 0 ),
         m_opMode( operationMode ),
         m_fenceValues{},
+#ifdef GENERATE_DEBUG_INFO
+        m_debugInfoDumpKey('Z'),
+#endif
         m_frameIndex( 0 )
     {
         // Load the scene config.
@@ -181,6 +185,9 @@ namespace rsmgpt
         // Unmap the debug info struct.
         m_debugInfoReadback->Unmap( 0, nullptr );
         pDebugInfo = nullptr;
+
+        // Dump the debug info.
+        dumpDebugInfo();
 #endif // GENERATE_DEBUG_INFO
 
 
@@ -230,6 +237,69 @@ namespace rsmgpt
 
 		// TODO: Add implementation here.
 	}
+
+#ifdef GENERATE_DEBUG_INFO
+
+    // Dump debug info.
+    void Engine::dumpDebugInfo()
+    {
+        if( m_debugInfoDumpKey.keyDown() && !m_debugInfoDumpKey.keyPressed )
+        {
+            // Define the debug info string.
+            const std::wstring debugInfo =
+                L"Dispatch thread ID: (" +
+                std::to_wstring( m_cursorPos.x ) +
+                L", " +
+                std::to_wstring( m_cursorPos.y ) +
+                L")\nx pair = (" +
+                std::to_wstring( xGrid ) +
+                L", " +
+                std::to_wstring( xBlock ) +
+                L")\ny pair = (" +
+                std::to_wstring( yGrid ) +
+                L", " +
+                std::to_wstring( yBlock ) +
+                L")\nHit ray origin = (" +
+                towstring( m_debugInfo.ray.o.x ) +
+                L", " +
+                towstring( m_debugInfo.ray.o.y ) +
+                L", " +
+                towstring( m_debugInfo.ray.o.z ) +
+                L")\nHit ray direction = (" +
+                towstring( m_debugInfo.ray.d.x ) +
+                L", " +
+                towstring( m_debugInfo.ray.d.y ) +
+                L", " +
+                towstring( m_debugInfo.ray.d.z ) +
+                L")\nHit something = " +
+                ( ( m_debugInfo.hitSomething ) ? L"Yes" : L"No" ) +
+                L"\nHit primitive indices = (" +
+                std::to_wstring( m_debugInfo.hitPrim.p0 ) +
+                L", " +
+                std::to_wstring( m_debugInfo.hitPrim.p1 ) +
+                L", " +
+                std::to_wstring( m_debugInfo.hitPrim.p2 ) +
+                L")\nTotal no. of primitive intersections = " +
+                std::to_wstring( m_debugInfo.nTotalPrimIntersections );
+
+            std::wofstream fDump( "debugInfo.txt" );
+            if( !fDump.is_open() )
+            {
+                ::OutputDebugStringA( "Unable to open dump file for writing!" );
+                throw;
+            }
+            fDump << debugInfo;
+            fDump.close();
+
+            m_debugInfoDumpKey.keyPressed = true;
+        }
+
+        if( !m_debugInfoDumpKey.keyDown() )
+        {
+            m_debugInfoDumpKey.keyPressed = false;
+        }
+    }
+#endif  // GENERATE_DEBUG_INFO
 
 	void Engine::OnRender()
 	{
@@ -1129,6 +1199,28 @@ namespace rsmgpt
             dpiY
             );
 
+        // Create D2D/DWrite objects for rendering text.
+        {
+            std::wstring_convert<std::codecvt_utf8<wchar_t>> myconv;
+            const auto& textParams = m_configRoot[ "text" ];
+            const std::wstring textFont( myconv.from_bytes( textParams[ "font" ].asString() ) );
+            ThrowIfFailed( m_d2dDeviceContext->CreateSolidColorBrush( D2D1::ColorF( D2D1::ColorF::White ), &m_textBrush ) );
+            ThrowIfFailed( m_dWriteFactory->CreateTextFormat(
+                //L"Verdana",
+                textFont.c_str(),
+                NULL,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                //25,
+                textParams[ "size" ].asFloat(),
+                L"en-us",
+                &m_textFormat
+                ) );
+            ThrowIfFailed( m_textFormat->SetTextAlignment( DWRITE_TEXT_ALIGNMENT_JUSTIFIED ) );
+            ThrowIfFailed( m_textFormat->SetParagraphAlignment( DWRITE_PARAGRAPH_ALIGNMENT_NEAR ) );
+        }
+
         // Create descriptor heaps.
         {
             m_pRtvHeap.reset( new RtvDescriptorHeap( m_d3d12Device, m_frameCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE ) );
@@ -1141,7 +1233,7 @@ namespace rsmgpt
                 m_frameCount,
                 { "pathTracer" },
                 m_d3d12Device.Get(),
-                m_computeCommandQueue.Get() ) );
+                m_commandQueue.Get() ) );
 
         // Create frame resources.
         {
@@ -1225,7 +1317,7 @@ namespace rsmgpt
                 RTVFormats.data()
                 );
             psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;   // Set the rasterizer state fill mode to wireframe.
-            psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // NOTE: Uncomment to disable back-face culling.
+            //psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;    // NOTE: Uncomment to disable back-face culling.
             ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_debugAccel3DPSO ) ) );
         }
 
@@ -1395,7 +1487,14 @@ namespace rsmgpt
             const path
                 modelsRoot( m_configRoot[ "models_dir" ].asString() ),
                 modelPath( modelsRoot / path( modelsConfig[ 0 ][ "filename" ].asString() ) );
-            m_pModel.reset( new Model( modelPath, m_d3d12Device.Get(), m_commandList.Get(), m_configRoot[ "accel" ][ "type" ].asString(), m_modelWorldTransform, true ) );
+            m_pModel.reset( 
+                new Model( 
+                    modelPath, 
+                    m_d3d12Device.Get(), 
+                    m_commandList.Get(), 
+                    m_configRoot[ "accel" ][ "type" ].asString(), 
+                    m_modelWorldTransform, 
+                    true ) );
         }
 
         // Close the command list and execute it to begin the vertex buffer copy into the default heap.
@@ -1614,41 +1713,8 @@ namespace rsmgpt
                 std::to_wstring( camPos.z ) +
                 L")\nPath tracing time = " +
                 std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) +
-                L" ms\n" +
-                L"Dispatch thread ID: (" +
-                std::to_wstring( m_cursorPos.x ) +
-                L", " +
-                std::to_wstring( m_cursorPos.y ) +
-                L"); x pair = (" +
-                std::to_wstring( xGrid ) +
-                L", " +
-                std::to_wstring( xBlock ) +
-                L"); y pair = (" +
-                std::to_wstring( yGrid ) +
-                L", " +
-                std::to_wstring( yBlock ) +
-                L")\nHit ray origin = (" +
-                std::to_wstring( m_debugInfo.ray.o.x ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.o.y ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.o.z ) +
-                L"); Hit ray direction = (" +
-                std::to_wstring( m_debugInfo.ray.d.x ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.d.y ) +
-                L", " +
-                std::to_wstring( m_debugInfo.ray.d.z ) +
-                L"); Hit primitive indices = (" +
-                std::to_wstring( m_debugInfo.hitPrim.p0 ) +
-                L", " +
-                std::to_wstring( m_debugInfo.hitPrim.p1 ) +
-                L", " +
-                std::to_wstring( m_debugInfo.hitPrim.p2 ) +
-                L")\nNo. of traversed bounds = " +
-                std::to_wstring( m_debugInfo.nTraversedBounds ) +
-                L"\nTotal no. of primitive intersections = " +
-                std::to_wstring( m_debugInfo.nTotalPrimIntersections );
+                L" ms\nHit something = " +
+                ( ( m_debugInfo.hitSomething ) ? L"Yes\n" : L"No\n" );
 #else
             std::wstring text =
                 L"Camera position: (" +
@@ -1754,25 +1820,28 @@ namespace rsmgpt
             0,
             m_commandList.Get() );
 
-        // Set the primitive topology to line list and unbind the vertex/index buffers.
-        m_commandList->IASetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_POINTLIST );
-        m_commandList->IASetVertexBuffers( 0, 1, nullptr );
-        m_commandList->IASetIndexBuffer( nullptr /*&m_boundsIndexBufferView*/ );
+        //// Set the primitive topology to line list and unbind the vertex/index buffers.
+        //m_commandList->IASetPrimitiveTopology( D3D_PRIMITIVE_TOPOLOGY_POINTLIST );
+        //m_commandList->IASetVertexBuffers( 0, 1, nullptr );
+        //m_commandList->IASetIndexBuffer( nullptr /*&m_boundsIndexBufferView*/ );
 
-        // Set the debug bbox gfx root signature, PSO.
-        m_commandList->SetGraphicsRootSignature( m_gfxBoundsRootSignature.get() );
-        m_commandList->SetPipelineState( m_debugAccelBounds3DPSO.Get() );
+        //// Set the debug bbox gfx root signature, PSO.
+        //m_commandList->SetGraphicsRootSignature( m_gfxBoundsRootSignature.get() );
+        //m_commandList->SetPipelineState( m_debugAccelBounds3DPSO.Get() );
 
-        // Traverse the BVH node tree and draw each bounds.
-        m_pModel->accel()->drawNodes( viewProj, DebugBoundsGSBounds, m_commandList.Get() );
+        //// Traverse the BVH node tree and draw each bounds.
+        //m_pModel->accel()->drawNodes( viewProj, DebugBoundsGSBounds, m_commandList.Get() );
 
-        // Add a resource barrier indicating that the current back buffer will be used to present.
+        // NOTE: This is removed because it conflicts with the 11on12 text rendering.
+#if 0
+     // Add a resource barrier indicating that the current back buffer will be used to present.
         D3D12_RESOURCE_BARRIER renderTargetToPresentBarrier =
             CD3DX12_RESOURCE_BARRIER::Transition(
                 m_renderTargets[ m_frameIndex ].Get(),
                 D3D12_RESOURCE_STATE_RENDER_TARGET,
                 D3D12_RESOURCE_STATE_PRESENT );
         m_commandList->ResourceBarrier( 1, &renderTargetToPresentBarrier );
+#endif // 0
 
         // Close the command list and execute it.
         ThrowIfFailed( m_commandList->Close() );
@@ -1780,7 +1849,101 @@ namespace rsmgpt
         ID3D12CommandList* const ppCommandLists[] = { m_commandList.Get() };
         m_commandQueue->ExecuteCommandLists( 1, ppCommandLists );
 
-        // TODO: Will have to remove this when we add the 11on12 text rendering.
+        // Render the test text.
+        {
+            const auto camPos = m_pDebugPerspectiveCamera->eyePosW();   // Storing that it can be used later when rendering it as text.
+            const auto& textParams = m_configRoot[ "text" ];
+            const D2D1_SIZE_F rtSize = m_d2dRenderTargets[ m_frameIndex ]->GetSize();
+            const D2D1_RECT_F textRect =
+                D2D1::RectF(
+                    textParams[ "text_box_left" ].asFloat(),
+                    textParams[ "text_box_top" ].asFloat(),
+                    textParams[ "text_box_right" ].asFloat(),
+                    textParams[ "text_box_bottom" ].asFloat() );
+#ifdef GENERATE_DEBUG_INFO
+            std::wstring text =
+                L"Camera position: (" +
+                std::to_wstring( camPos.x ) +
+                L", " +
+                std::to_wstring( camPos.y ) +
+                L", " +
+                std::to_wstring( camPos.z ) +
+                L")\nPath tracing time = " +
+                std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) +
+                L" ms\n" +
+                L"Dispatch thread ID: (" +
+                std::to_wstring( m_cursorPos.x ) +
+                L", " +
+                std::to_wstring( m_cursorPos.y ) +
+                L"); x pair = (" +
+                std::to_wstring( xGrid ) +
+                L", " +
+                std::to_wstring( xBlock ) +
+                L"); y pair = (" +
+                std::to_wstring( yGrid ) +
+                L", " +
+                std::to_wstring( yBlock ) +
+                L")\nHit ray origin = (" +
+                std::to_wstring( m_debugInfo.ray.o.x ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.o.y ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.o.z ) +
+                L"); Hit ray direction = (" +
+                std::to_wstring( m_debugInfo.ray.d.x ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.d.y ) +
+                L", " +
+                std::to_wstring( m_debugInfo.ray.d.z ) +
+                L"); Hit primitive indices = (" +
+                std::to_wstring( m_debugInfo.hitPrim.p0 ) +
+                L", " +
+                std::to_wstring( m_debugInfo.hitPrim.p1 ) +
+                L", " +
+                std::to_wstring( m_debugInfo.hitPrim.p2 ) +
+                L")\nNo. of traversed bounds = " +
+                std::to_wstring( m_debugInfo.nTraversedBounds ) +
+                L"\nTotal no. of primitive intersections = " +
+                std::to_wstring( m_debugInfo.nTotalPrimIntersections );
+#else
+            std::wstring text =
+                L"Camera position: (" +
+                std::to_wstring( camPos.x ) +
+                L", " +
+                std::to_wstring( camPos.y ) +
+                L", " +
+                std::to_wstring( camPos.z ) +
+                L")\nPath tracing time = " +
+                std::to_wstring( static_cast<float>( m_pathTracingTime ) / 1000.f ) +
+                L" ms";
+#endif // GENERATE_DEBUG_INFO
+
+            //static const WCHAR text[] = L"11On12";
+
+            // Acquire our wrapped render target resource for the current back buffer.
+            m_d3d11On12Device->AcquireWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
+
+            // Render text directly to the back buffer.
+            m_d2dDeviceContext->SetTarget( m_d2dRenderTargets[ m_frameIndex ].Get() );
+            m_d2dDeviceContext->BeginDraw();
+            m_d2dDeviceContext->SetTransform( D2D1::Matrix3x2F::Identity() );
+            m_d2dDeviceContext->DrawTextW(
+                text.c_str(),
+                static_cast<UINT32>( text.length() ),
+                m_textFormat.Get(),
+                &textRect,
+                m_textBrush.Get()
+                );
+            ThrowIfFailed( m_d2dDeviceContext->EndDraw() );
+
+            // Release our wrapped render target resource. Releasing 
+            // transitions the back buffer resource to the state specified
+            // as the OutState when the wrapped resource was created.
+            m_d3d11On12Device->ReleaseWrappedResources( m_wrappedBackBuffers[ m_frameIndex ].GetAddressOf(), 1 );
+
+            // Flush to submit the 11 command list to the shared command queue.
+            m_d3d11DeviceContext->Flush();
+        }
 
         // Present the frame.
         m_swapChain->Present( 1, 0 );

@@ -28,13 +28,14 @@
 #include "rsmgptCamera.h"
 #include "rsmgptModel.h"
 #include "rsmgptGpuTimer.h"
+#include "rsmgptIO.h"
 
 #include <json/json.h>
 
 #include <functional>
 
 // Uncomment this to generate debug info which can be read back from the path tracing shader.
-//#define GENERATE_DEBUG_INFO
+#define GENERATE_DEBUG_INFO
 
 namespace rsmgpt {
 	
@@ -79,6 +80,11 @@ namespace rsmgpt {
         // Render methods.
         void renderPathTracingMode();
         void renderDebugAccelMode();
+
+#ifdef GENERATE_DEBUG_INFO
+        // Dump debug info.
+        void dumpDebugInfo();
+#endif  // GENERATE_DEBUG_INFO
 
         // Engine constants.
         static const UINT m_frameCount = 2;
@@ -222,6 +228,7 @@ namespace rsmgpt {
 #ifdef GENERATE_DEBUG_INFO
         ComPtr<ID3D12Resource> m_debugInfoDefault;
         ComPtr<ID3D12Resource> m_debugInfoReadback;
+        KeystrokeHandler m_debugInfoDumpKey;
 #endif // GENERATE_DEBUG_INFO
         ComPtr<ID3D12Resource> m_depthStencil;
         ComPtr<ID3D12Resource> m_pathTracerOutput;

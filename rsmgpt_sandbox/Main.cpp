@@ -2,11 +2,17 @@
 #include <rsmgptDefns.h>
 #include <rsmgptCamera.h>
 #include <rsmgptModel.h>
+#include <rsmgptResourceBinding.h>
+#include <rsmgptResources.h>
 #include <iostream>
 #include <numeric>
+#include <fstream>
 #include <DXSampleHelper.h>
 
 #include <bvh.h>
+
+// Shaders
+#include <rsmgptAccelStructureDebugCS.h>
 
 //#pragma push_macro("max")
 //#include <algorithm>
@@ -379,10 +385,10 @@ int main( int argc, char *argv[] )
     ThrowIfFailed( CreateDXGIFactory1( IID_PPV_ARGS( &factory ) ) );
 
     // NOTE: Uncomment to enable the WARP device.
-    bool m_useWarpDevice = false;
-    ComPtr<ID3D12Device> m_d3d12Device;
+    bool useWarpDevice = /*true;*/ false;
+    ComPtr<ID3D12Device> device;
 
-    if( m_useWarpDevice )
+    if( useWarpDevice )
     {
         ComPtr<IDXGIAdapter> warpAdapter;
         ThrowIfFailed( factory->EnumWarpAdapter( IID_PPV_ARGS( &warpAdapter ) ) );
@@ -391,7 +397,7 @@ int main( int argc, char *argv[] )
             D3D12CreateDevice(
                 warpAdapter.Get(),
                 D3D_FEATURE_LEVEL_11_0,
-                IID_PPV_ARGS( &m_d3d12Device )
+                IID_PPV_ARGS( &device )
                 ) );
     }
     else
@@ -400,40 +406,358 @@ int main( int argc, char *argv[] )
             D3D12CreateDevice(
                 nullptr,                    // Video adapter. nullptr implies the default adapter.
                 D3D_FEATURE_LEVEL_11_0,     // D3D feature level.
-                IID_PPV_ARGS( &m_d3d12Device )   // D3D device object.
+                IID_PPV_ARGS( &device )   // D3D device object.
                 ) );
     }
 
     // Create the render and compute command queues that we will be using.
-    ComPtr<ID3D12CommandQueue> m_commandQueue;
+    ComPtr<ID3D12CommandQueue> commandQueue;
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    ThrowIfFailed( m_d3d12Device->CreateCommandQueue( &queueDesc, IID_PPV_ARGS( &m_commandQueue ) ) );
+    ThrowIfFailed( device->CreateCommandQueue( &queueDesc, IID_PPV_ARGS( &commandQueue ) ) );
 
-    ComPtr<ID3D12CommandAllocator> m_commandAllocator;
-    ThrowIfFailed( m_d3d12Device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &m_commandAllocator ) ) );
+    ComPtr<ID3D12CommandAllocator> commandAllocator;
+    ThrowIfFailed( device->CreateCommandAllocator( D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS( &commandAllocator ) ) );
 
-    ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ComPtr<ID3D12GraphicsCommandList> commandList;
     ThrowIfFailed(
-        m_d3d12Device->CreateCommandList(
+        device->CreateCommandList(
             0,                                          // GPU node (only 1 GPU for now)
             D3D12_COMMAND_LIST_TYPE_DIRECT,             // Command list type
-            m_commandAllocator.Get(),  // Command allocator
+            commandAllocator.Get(),  // Command allocator
             nullptr,                      // Pipeline state
-            IID_PPV_ARGS( &m_commandList ) ) );         // Command list (output)
+            IID_PPV_ARGS( &commandList ) ) );         // Command list (output)
 
-    const path modelPath( "N:\\rsmgpt\\models\\spider.obj" );
-    Model model( modelPath, m_d3d12Device.Get(), m_commandList.Get(), "hlbvh", Mat4::Identity );
+    //const path modelPath( "N:\\rsmgpt\\models\\spider.obj" );
+    const path modelPath( "N:\\path_tracing_resources\\models\\dragon_recon\\dragon_vrip_res3.ply" );
+    Model model( modelPath, device.Get(), commandList.Get(), "hlbvh", Mat4::Identity );
 
     // Test ray intersection with the spider model.
     Ray ray(
-        Point3( 0, 17.25, -250 ),    // Origin
-        Vec3( -0.175084, -0.040588, 0.983716 )       // Direction
+        Point3( -0.064651757478713989257813, 0.22266295552253723144531, -0.051112219691276550292969 ),    // Origin
+        Vec3( 0.00023818585032131522893906, -0.59660404920578002929688, 0.80253571271896362304688 )       // Direction
         );
+
+    // Determine whether to trace the ray on the CPU or GPU.
+    assert( argc == 2 );
+    const bool traceOnGPU = ( strcmp( argv[ 1 ], "1" ) == 0 );
+
     float t, b1, b2;
     Primitive hitPrim;
-    bool hit = model.accel()->IntersectStacklessP( model.vertexList(), ray, hitPrim, t, b1, b2 );
+    if( !traceOnGPU )
+    {
+        const bool hit = model.accel()->/*IntersectP*/IntersectStacklessP( model.vertexList(), ray, hitPrim, t, b1, b2 );
+        std::cout << "Primitive " << ( hit ? "hit!\n" : "not hit!\n" );
+    }
+    else
+    {
+        // Close the command list and execute.
+        commandList->Close();
+        ID3D12CommandList* cmdLists[] = { commandList.Get() };
+        commandQueue->ExecuteCommandLists( 1, cmdLists );
+
+        // Create synchronization objects and wait until assets have been uploaded to the GPU.
+        ComPtr<ID3D12Fence> computeFence;
+        UINT fenceValue = 0;
+        ThrowIfFailed( device->CreateFence( fenceValue++, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS( &computeFence ) ) );
+
+        // Create an event handle to use for frame synchronization.
+        HANDLE fenceEvent = CreateEventEx( nullptr, FALSE, FALSE, EVENT_ALL_ACCESS );
+        if( fenceEvent == nullptr )
+        {
+            ThrowIfFailed( HRESULT_FROM_WIN32( GetLastError() ) );
+        }
+
+        // Schedule a Signal command in the queue.
+        ThrowIfFailed( commandQueue->Signal( computeFence.Get(), fenceValue ) );
+
+        // Wait until the fence has been processed.
+        WaitForFenceOnCPU( computeFence.Get(), fenceValue, fenceEvent );
+        ++fenceValue;
+
+        // Release the model's upload buffers.
+        model.releaseUploadBuffers();
+
+        // Create root signature.
+        RootSignature computeRootSignature;
+        computeRootSignature.reset( 3, 0 );
+
+        // AccelStructureDebug root signature.
+        // b0: cbDebugRay (just the ray)
+        computeRootSignature[ 0 ].InitAsConstants( sizeof( Ray ) / sizeof( UINT ), 0 );
+
+        // t0: gVertexBuffer (from accel)
+        // t1: gPrimitives (from accel)
+        // t2: gBVHNodes (from accel)
+        CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0 );
+        computeRootSignature[ 1 ].InitAsDescriptorTable( 1, &srvTable );
+
+        // u0: gRayHit (result of the ray intersection, need default and readback resources for this)
+        // u1: gAccelDebug (debug info, need default and readback resources for this)
+        CD3DX12_DESCRIPTOR_RANGE uavTable( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0 );
+        computeRootSignature[ 2 ].InitAsDescriptorTable( 1, &uavTable );
+
+        computeRootSignature.finalize( device.Get() );
+
+        // Create PSO.
+        D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
+        computePsoDesc.pRootSignature = computeRootSignature.get();
+        computePsoDesc.CS = { g_prsmgptAccelStructureDebugCS, _countof( g_prsmgptAccelStructureDebugCS ) };
+
+        ComPtr<ID3D12PipelineState> pso;
+        ThrowIfFailed( device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &pso ) ) );
+
+        // Create resources (debug info array and associated counter).
+        const UINT nAccelDebugInfo = 128;
+        const UINT accelDebugInfoSizeInBytes = nAccelDebugInfo * sizeof( AccelDebug );
+        ComPtr<ID3D12Resource> accelDebugInfoDefault, accelDebugInfoReadback, rayHitDefault, rayHitReadback, counterUpload, counterDefault, counterReadback;
+        createCommittedDefaultBuffer(
+            device.Get(),
+            accelDebugInfoDefault,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            accelDebugInfoSizeInBytes,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+            );
+        createCommittedReadbackBuffer(
+            device.Get(),
+            accelDebugInfoReadback,
+            accelDebugInfoSizeInBytes );
+        createCommittedDefaultBuffer(
+            device.Get(),
+            rayHitDefault,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            sizeof(UINT),
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+            );
+        createCommittedReadbackBuffer(
+            device.Get(),
+            rayHitReadback,
+            sizeof(UINT) );
+        createCommittedUploadBuffer(
+            device.Get(),
+            counterUpload,
+            sizeof( UINT ) );
+        createCommittedDefaultBuffer(
+            device.Get(),
+            counterDefault,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            sizeof( UINT ),
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS );
+        createCommittedReadbackBuffer(
+            device.Get(),
+            counterReadback,
+            sizeof( UINT ) );
+
+        // Map the counter's upload resource and init it to 0.
+        {
+            UINT* pUpload = nullptr;
+            ThrowIfFailed( counterUpload->Map( 0, nullptr, reinterpret_cast<void**>( &pUpload ) ) );
+            *pUpload = 0;
+            counterUpload->Unmap( 0, nullptr );
+        }
+
+        // Create descriptor heaps (3 SRVs + 2 UAVs).
+        CsuDescriptorHeapPtr descHeap( new CsuDescriptorHeap( device, 5, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE ) );
+
+        // Create views.
+
+        // t0: gVertexBuffer (from accel)
+        D3D12_SHADER_RESOURCE_VIEW_DESC vbDesc;
+        vbDesc.Format = DXGI_FORMAT_UNKNOWN;
+        vbDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        vbDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        vbDesc.Buffer.FirstElement = 0;
+        vbDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        vbDesc.Buffer.NumElements = static_cast<UINT>( model.numVertices() );
+        vbDesc.Buffer.StructureByteStride = sizeof( ModelVertex );
+        descHeap->addSRV( model.vertexBuffer(), &vbDesc, "gVertexBuffer" );
+
+        // t1: gPrimitives (from accel)
+        D3D12_SHADER_RESOURCE_VIEW_DESC primDesc( vbDesc );
+        primDesc.Buffer.NumElements = static_cast<UINT>( model.accel()->nPrimitives() );
+        primDesc.Buffer.StructureByteStride = model.accel()->primitiveSize();
+        descHeap->addSRV( model.accel()->primitivesResource(), &primDesc, "gPrimitives" );
+
+        // t2: gBVHNodes (from accel)
+        D3D12_SHADER_RESOURCE_VIEW_DESC nodesDesc( primDesc );
+        nodesDesc.Buffer.NumElements = static_cast<UINT>( model.accel()->nBVHNodes() );
+        nodesDesc.Buffer.StructureByteStride = model.accel()->nodeSize();
+        descHeap->addSRV( model.accel()->nodesResource(), &nodesDesc, "gBVHNodes" );
+
+        // u0: gRayHit (result of the ray intersection, need default and readback resources for this)
+        D3D12_UNORDERED_ACCESS_VIEW_DESC rayHitUavDesc = {};
+        rayHitUavDesc.Format = DXGI_FORMAT_R32_UINT;
+        rayHitUavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        rayHitUavDesc.Buffer.FirstElement = 0;
+        rayHitUavDesc.Buffer.NumElements = 1;
+        rayHitUavDesc.Buffer.StructureByteStride = 0;
+        descHeap->addUAV( rayHitDefault.Get(), &rayHitUavDesc, "gRayHit" );
+        
+        // u1: gAccelDebug (debug info, need default and readback resources for this)
+        D3D12_UNORDERED_ACCESS_VIEW_DESC debugInfoUavDesc = {};
+        debugInfoUavDesc.Format = DXGI_FORMAT_UNKNOWN;
+        debugInfoUavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+        debugInfoUavDesc.Buffer.FirstElement = 0;
+        debugInfoUavDesc.Buffer.NumElements = nAccelDebugInfo;
+        debugInfoUavDesc.Buffer.StructureByteStride = sizeof( AccelDebug );
+        debugInfoUavDesc.Buffer.CounterOffsetInBytes = 0;
+        descHeap->addUAV( accelDebugInfoDefault.Get(), &debugInfoUavDesc, "gAccelDebug", counterDefault.Get() );
+
+        // Reset the command allocator and command list.
+        commandAllocator->Reset();
+        commandList->Reset( commandAllocator.Get(), pso.Get() );
+
+        // Set root signature, descriptor heaps.
+        commandList->SetComputeRootSignature( computeRootSignature.get() );
+        ID3D12DescriptorHeap* descHeaps[] = { descHeap->getHeap() };
+        commandList->SetDescriptorHeaps( 1, descHeaps );
+
+        // Set views.
+
+        // b0: cbDebugRay (just the ray)
+        commandList->SetComputeRoot32BitConstants( 0, sizeof( Ray ) / sizeof( UINT ), reinterpret_cast<void*>( &ray ), 0 );
+
+        // t0: gVertexBuffer (from accel)
+        // t1: gPrimitives (from accel)
+        // t2: gBVHNodes (from accel)
+        commandList->SetComputeRootDescriptorTable( 1, descHeap->getGPUHandle( "gVertexBuffer" ) );
+
+        // u0: gRayHit (result of the ray intersection, need default and readback resources for this)
+        // u1: gAccelDebug (debug info, need default and readback resources for this)
+        commandList->SetComputeRootDescriptorTable( 2, descHeap->getGPUHandle( "gRayHit" ) );
+
+        // Copy from counterUpload to counterDefault.
+        commandList->CopyResource( counterDefault.Get(), counterUpload.Get() );
+
+        // Transition counterDefault from copy dest to unordered access.
+        commandList->ResourceBarrier(
+            1,
+            &CD3DX12_RESOURCE_BARRIER::Transition(
+                counterDefault.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS ) );
+
+        // Dispatch.
+        commandList->Dispatch( 1, 1, 1 );
+        
+        // Set barriers.
+        D3D12_RESOURCE_BARRIER barriers[] = {
+            CD3DX12_RESOURCE_BARRIER::Transition( accelDebugInfoDefault.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE ),
+            CD3DX12_RESOURCE_BARRIER::Transition( rayHitDefault.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE ),
+            CD3DX12_RESOURCE_BARRIER::Transition( counterDefault.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE ) };
+        commandList->ResourceBarrier( 3 /*1*/, barriers );
+
+        // Copy debug info and ray hit from their respective default resources to their respective readback resources.
+        commandList->CopyResource( accelDebugInfoReadback.Get(), accelDebugInfoDefault.Get() );
+        commandList->CopyResource( rayHitReadback.Get(), rayHitDefault.Get() );
+        commandList->CopyResource( counterReadback.Get(), counterDefault.Get() );
+        
+        // Close the command list and execute.
+        commandList->Close();
+        //ID3D12CommandList* cmdLists[] = { commandList.Get() };
+        commandQueue->ExecuteCommandLists( 1, cmdLists );
+
+        // Wait for the command list to finish executing.
+        // Schedule a Signal command in the queue.
+        ThrowIfFailed( commandQueue->Signal( computeFence.Get(), fenceValue ) );
+
+        // Wait until the fence has been processed.
+        WaitForFenceOnCPU( computeFence.Get(), fenceValue, fenceEvent );
+
+        // Map debug info, counter and ray hit.
+        void *pDebugInfo( nullptr ), *pCounter( nullptr ), *pRayHit( nullptr );
+        ThrowIfFailed( accelDebugInfoReadback->Map( 0, nullptr, &pDebugInfo ) );
+        ThrowIfFailed( counterReadback->Map( 0, nullptr, &pCounter ) );
+        ThrowIfFailed( rayHitReadback->Map( 0, nullptr, &pRayHit ) );
+
+        const UINT nFilledAccelDebug = *reinterpret_cast<UINT*>( pCounter );
+        const UINT rayHit = *reinterpret_cast<UINT*>( pRayHit );
+        AccelDebug* pAccelDebug = reinterpret_cast<AccelDebug*>( pDebugInfo );
+
+        // Open the accel debug output file.
+        std::ofstream fOut( "accelDebug.txt" );
+        if( !fOut.is_open() )
+        {
+            throw;
+        }
+
+        // Iterate over the accel debug data.
+        for( UINT i = 0; i < nFilledAccelDebug; ++i )
+        {
+            fOut << "TreeLevel: " << pAccelDebug[ i ].treeLevel << ": ";
+            switch( pAccelDebug[ i ].accelTraversal )
+            {
+            case AT_HIT_LEFT:
+                fOut
+                    << "Hit left; nodeId = "
+                    << pAccelDebug[ i ].nodeId
+                    << "; siblingId = "
+                    << pAccelDebug[ i ].siblingId
+                    << "; bitstack = "
+                    << pAccelDebug[ i ].bitstack
+                    << std::endl;
+                break;
+            case AT_HIT_RIGHT:
+                fOut
+                    << "Hit right; nodeId = "
+                    << pAccelDebug[ i ].nodeId
+                    << "; siblingId = "
+                    << pAccelDebug[ i ].siblingId
+                    << "; bitstack = "
+                    << pAccelDebug[ i ].bitstack
+                    << std::endl;
+                break;
+            case AT_HIT_LEFT_ONLY:
+                fOut
+                    << "Hit left only; nodeId = "
+                    << pAccelDebug[ i ].nodeId
+                    << "; siblingId = "
+                    << pAccelDebug[ i ].siblingId
+                    << "; bitstack = "
+                    << pAccelDebug[ i ].bitstack
+                    << std::endl;
+                break;
+            case AT_HIT_RIGHT_ONLY:
+                fOut
+                    << "Hit right only; nodeId = "
+                    << pAccelDebug[ i ].nodeId
+                    << "; siblingId = "
+                    << pAccelDebug[ i ].siblingId
+                    << "; bitstack = "
+                    << pAccelDebug[ i ].bitstack
+                    << std::endl;
+                break;
+            case AT_HIT_PRIMITIVE:
+                fOut
+                    << "Hit primitive; tMin = "
+                    << pAccelDebug[ i ].tMin
+                    << "; hitPrimIndx = "
+                    << pAccelDebug[ i ].hitPrimId
+                    << "; bitstack = "
+                    << pAccelDebug[ i ].bitstack
+                    << std::endl;
+                break;
+            case AT_BACKTRACK:
+                fOut
+                    << "Backtrack; nodeId = "
+                    << pAccelDebug[ i ].nodeId
+                    << "; siblingId = "
+                    << pAccelDebug[ i ].siblingId
+                    << "; bitstack = "
+                    << pAccelDebug[ i ].bitstack
+                    << std::endl;
+                break;
+            }
+        }
+
+        // Close the file.
+        fOut.close();
+
+        accelDebugInfoReadback->Unmap( 0, nullptr );
+        counterReadback->Unmap( 0, nullptr );
+        rayHitReadback->Unmap( 0, nullptr );
+    }
 
 #if 0
     Bounds3f box(
