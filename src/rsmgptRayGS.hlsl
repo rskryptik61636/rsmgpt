@@ -21,10 +21,30 @@
 ******************************************************************************/
 
 #include "rsmgptBasicCommon.hlsli"
+#include "rsmgptPathTracingCommon.hlsli"
 
-DEBUG_VS_OUT main( uint id : SV_VertexId )
+// Debug ray and view-projection transform.
+cbuffer DebugRay : register( b0, space0 )
 {
-    DEBUG_VS_OUT vOut;
-    vOut.position = float4( 0, 0, 0.5, 1 );
-    return vOut;
+    Ray gRay;
+    float4x4 gVP;
+}
+
+[maxvertexcount( 2 )]
+void main(
+    point DEBUG_VS_OUT input[ 1 ],
+    inout LineStream< DEBUG_PS_IN > output
+    )
+{
+    // Pt 0: Ray origin.
+    DEBUG_PS_IN vOut;
+    vOut.position = mul( float4( gRay.o.x, gRay.o.y, gRay.o.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    // Pt 1: Ray origin + 1000 * ray direction.
+    float3 d = gRay.o + 1000 * gRay.d;
+    vOut.position = mul( float4( d.x, d.y, d.z, 1.f ), gVP );
+    output.Append( vOut );
+
+    output.RestartStrip();
 }

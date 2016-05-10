@@ -68,6 +68,10 @@ bool primHitManual( in Ray ray, out float t, out float b1, out float b2, inout f
 bool primHit( in Ray ray, in uint3 dispatchThreadId, inout float4 color )
 {
     float3 invDir = float3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
+    const float3 invDirPad = float3(
+        addUlpMag( invDir.x, 2 ),
+        addUlpMag( invDir.y, 2 ),
+        addUlpMag( invDir.z, 2 ) );
     int3 dirIsNeg = int3( invDir.x < 0, invDir.y < 0, invDir.z < 0 );
     int nodesToVisit[ 64 /*32*/ ];   // NOTE: Reducing nodesToVisit to reduce temp register requirements.
     int toVisitOffset = 0, currentNodeIndex = 0;
@@ -97,7 +101,7 @@ bool primHit( in Ray ray, in uint3 dispatchThreadId, inout float4 color )
     while( true )
     {
         Bounds bbox = gBVHNodes[ currentNodeIndex ].bounds;
-        if( boxIntersect( ray, bbox, invDir, dirIsNeg, boxtMin ) )
+        if( boxIntersect( ray, bbox, invDir, invDirPad, dirIsNeg, boxtMin ) )
         {
 #ifdef PATH_TRACING_MODE
             // Increment the debug info's nTraversedBounds.
@@ -238,10 +242,14 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
 {
     // MBVH2 traversal loop
     const float3 invDir = float3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
+    const float3 invDirPad = float3(
+        addUlpMag( invDir.x, 2 ),
+        addUlpMag( invDir.y, 2 ),
+        addUlpMag( invDir.z, 2 ) );
     const int3 dirIsNeg = int3( invDir.x < 0, invDir.y < 0, invDir.z < 0 );
     uint nodeId = 0, junk, hitPrimIndx;
     uint bitstack = 0;
-    uint /*parentId = 0,*/ siblingId = 0; // cached node links
+    uint siblingId = 0; // cached node links
     float oritMax = ray.tMax, tMin = ray.tMax, b1Hit, b2Hit;
     bool stopTraversal = false;
 
@@ -285,6 +293,7 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
                     ray,
                     gBVHNodes[ leftChildIndx ].bounds,
                     invDir,
+                    invDirPad,
                     dirIsNeg,
                     leftBoxt );
             const bool rightHit =
@@ -292,6 +301,7 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
                     ray,
                     gBVHNodes[ rightChildIndx ].bounds,
                     invDir,
+                    invDirPad, 
                     dirIsNeg,
                     rightBoxt );
 
@@ -488,8 +498,8 @@ bool primHitStackless( in Ray ray, in uint3 dispatchThreadId, inout float4 color
             //}
             
             // Compute Phong-blinn shading for the intersected triangle.
-            //color = calcBlinnPhongLighting( M, LColor, AColor, N, L, H );
-            color = float4( 0, 0, 1, 1 ); // NOTE: Uncomment for flat shading to debug lighting issues.
+            color = calcBlinnPhongLighting( M, LColor, AColor, N, L, H );
+            //color = float4( 0, 0, 1, 1 ); // NOTE: Uncomment for flat shading to debug lighting issues.
 #endif // PATH_TRACING_MODE
 
             return true;

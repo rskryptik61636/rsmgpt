@@ -42,14 +42,14 @@ struct BASIC_PS_IN
     float4 color        : COLOR;
 };
 
-// Bbox VS output struct.
-struct BBOX_VS_OUT
+// Debug VS output struct.
+struct DEBUG_VS_OUT
 {
     float4 position     : POSITION;
 };
 
 // Bbox PS input struct.
-struct BBOX_PS_IN
+struct DEBUG_PS_IN
 {
     float4 position     : SV_POSITION;
 };

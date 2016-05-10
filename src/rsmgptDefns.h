@@ -85,7 +85,7 @@ namespace rsmgpt
     typedef Vec3 Point3;
 
     typedef Math::Vector4 Vec4;
-    typedef Vec4 Color;
+    typedef Vec4 Colour;
     typedef Math::Matrix Mat4;
     typedef Math::Plane Plane;
 

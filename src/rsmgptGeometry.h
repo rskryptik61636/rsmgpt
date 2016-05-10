@@ -34,7 +34,7 @@ namespace rsmgpt
         Vec2 texCoord;
         Vec3 tangent;
         Vec3 binormal;
-        Color color;
+        Colour color;
     };
 
     // Represents a mesh subset of a model. It contains vertex and index counts and references

@@ -35,7 +35,7 @@
 #include <functional>
 
 // Uncomment this to generate debug info which can be read back from the path tracing shader.
-#define GENERATE_DEBUG_INFO
+//#define GENERATE_DEBUG_INFO
 
 namespace rsmgpt {
 	
@@ -158,10 +158,18 @@ namespace rsmgpt {
             DebugGfxRootParametersCount
         };
 
+        enum DebugRayRootParameters
+        {
+            DebugRayGSParams,
+            DebugRayPSParams,           
+            DebugRayRootParametersCount
+        };
+
         enum DebugBoundsRootParameters
         {
-            DebugBoundsGSBounds,              // Bounds constant buffer.
-            DebugBoundsRootParametersCount
+            DebugBoundsGSParams,
+            DebugBoundsPSParams,
+            DebugBoundsRootParamsCount
         };
 
         // Cursor position and grid/block x/y indices.
@@ -197,9 +205,10 @@ namespace rsmgpt {
         ComPtr<ID3D12CommandAllocator> m_computeCommandAllocators[ m_frameCount ];
         ComPtr<ID3D12CommandQueue> m_commandQueue;
         ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
-        RootSignature m_gfxRootSignature;
-        RootSignature m_gfxBoundsRootSignature;
-        RootSignature m_computeRootSignature;
+        RootSignature m_rsGfxDraw;
+        RootSignature m_rsDebugRay;
+        RootSignature m_rsDebugBounds;
+        RootSignature m_rsCompute;
         ComPtr<ID3D12CommandSignature> m_commandSignature;
         CsuDescriptorHeapPtr m_pCsuHeap;
         RtvDescriptorHeapPtr m_pRtvHeap;
@@ -214,12 +223,13 @@ namespace rsmgpt {
         HANDLE m_fenceEvent;
 
         // Asset objects.
-        ComPtr<ID3D12PipelineState> m_fullScreenTri3DPSO;
-        ComPtr<ID3D12PipelineState> m_debugAccel3DPSO;
-        ComPtr<ID3D12PipelineState> m_debugAccelBounds3DPSO;
-        ComPtr<ID3D12PipelineState> m_pathTracingComputePSO;
-        ComPtr<ID3D12GraphicsCommandList> m_commandList;
-        ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
+        ComPtr<ID3D12PipelineState> m_psoFullScreenTri;
+        ComPtr<ID3D12PipelineState> m_psoDebugAccel;
+        ComPtr<ID3D12PipelineState> m_psoDebugRay;
+        ComPtr<ID3D12PipelineState> m_psoDebugBounds;
+        ComPtr<ID3D12PipelineState> m_psoPathTracer;
+        ComPtr<ID3D12GraphicsCommandList> m_clGfx;
+        ComPtr<ID3D12GraphicsCommandList> m_clPathTracer;
         ComPtr<ID2D1SolidColorBrush> m_textBrush;
         ComPtr<IDWriteTextFormat> m_textFormat;
         ComPtr<ID3D12Resource> m_vertexBuffer;
@@ -236,6 +246,9 @@ namespace rsmgpt {
         ComPtr<ID3D12Resource> m_timestampResultBuffer;
         UINT64 m_computeCommandQueueTimestampFrequency;
         UINT64 m_pathTracingTime;
+        KeystrokeHandler m_incrementBvhLevel;
+        KeystrokeHandler m_decrementBvhLevel;
+        UINT m_bvhDebugLevel;
 
         // Model params.
         ModelPtr m_pModel;

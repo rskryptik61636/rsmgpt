@@ -61,6 +61,7 @@ struct LinearBVHNode;
 inline float Lerpf( float t, float v1, float v2 ) { return ( 1 - t ) * v1 + t * v2; }
 
 #ifdef _MSC_VER
+#define MaxUint std::numeric_limits<UINT>::max()
 #define MaxFloat std::numeric_limits<float>::max()
 #define Infinity std::numeric_limits<float>::infinity()
 #else
@@ -348,6 +349,12 @@ struct DebugBounds
     Mat4 viewProj;
 };
 
+struct DebugRay
+{
+    Ray gRay;
+    Mat4 gVP;
+};
+
 enum AccelTraversal
 {
     AT_HIT_LEFT,
@@ -398,8 +405,17 @@ class BVHAccel /*: public Aggregate*/ {
 
     bool Intersect( const Ray &ray, SurfaceInteraction *isect ) const;    
 #endif // 0
-
-    void drawNodes( const Mat4& viewProj, const UINT rootParamIndx, ID3D12GraphicsCommandList* pCmdList ) const;
+    void drawBVHNodes( const Mat4& viewProj, const UINT gsParamIndx, const Bounds3f& bounds, const UINT psParamIndx, const Colour& colour, ID3D12GraphicsCommandList* pCmdList ) const;
+    void drawIntersectedNodesStackless( 
+        const std::vector<ModelVertex>& vertexList, 
+        const Ray& ray, 
+        const Mat4& viewProj, 
+        const UINT gsParamIndx,
+        const UINT psParamIndx,
+        const Colour visitedNodesColour,
+        const Colour backtrackedNodesColour,
+        const int haltLevel, 
+        ID3D12GraphicsCommandList* pCmdList ) const;
 
 
   private:
@@ -422,6 +438,23 @@ class BVHAccel /*: public Aggregate*/ {
                                 std::vector<BVHBuildNode *> &treeletRoots,
                                 int start, int end, int *totalNodes) const;
     int flattenBVHTree(const int parentOffset, BVHBuildNode *node, int *offset);
+    void drawBVHNode( const Mat4& viewProj, const UINT gsParamIndx, const Bounds3f& bounds, const UINT psParamIndx, const Colour& colour, ID3D12GraphicsCommandList* pCmdList ) const;
+
+    // BVH traversal core functions.
+    void traverseNodesStackless(
+        const std::vector<ModelVertex>& vertexList,
+        const Ray& ray,
+        float& tMin,
+        float& b1Hit,
+        float& b2Hit,
+        const bool drawNodes = false,
+        const UINT gsParamIndx = 0,
+        const UINT psParamIndx = 1,
+        const Colour& visitedNodeColour = Colour( 1.f, 1.f, 1.f, 1.f ),
+        const Colour& backtrackedNodeColour = Colour( 1.f, 0.f, 0.f, 1.f ),
+        const UINT haltLevel = (std::numeric_limits<UINT>::max)(),
+        const Mat4& viewProj = Mat4::Identity,
+        ID3D12GraphicsCommandList* pCmdList = nullptr ) const;
 
     // BVHAccel Private Data
     const int maxPrimsInNode;

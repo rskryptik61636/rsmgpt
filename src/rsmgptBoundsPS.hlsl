@@ -22,7 +22,14 @@
 
 #include "rsmgptBasicCommon.hlsli"
 
-float4 main( BBOX_PS_IN pIn ) : SV_TARGET
+// Output colour.
+cbuffer OutputColour : register( b0, space1 )
 {
-	return float4( 1.0f, 1.0f, 1.0f, 1.0f );
+    float4 gOutColour;
+}
+
+float4 main( DEBUG_PS_IN pIn ) : SV_TARGET
+{
+    return gOutColour;
+	//return float4( 1.0f, 1.0f, 1.0f, 1.0f );
 }

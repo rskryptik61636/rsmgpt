@@ -220,7 +220,7 @@ bool Primitive::IntersectP(
 
     // Compute the det = (e1.s1). Reject if < 0.
     const float det = e1.Dot( s1 ); //dot( e1, s1 );
-    if( det < 0.000001f )
+    if( det < 0.0000001f )
     {
         return false;
     }
@@ -923,21 +923,32 @@ bool BVHAccel::IntersectP( const std::vector<ModelVertex>& vertexList, const Ray
     return false;
 }
 
-bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const
+void BVHAccel::traverseNodesStackless(
+    const std::vector<ModelVertex>& vertexList,
+    const Ray& ray, 
+    float& tMin,
+    float& b1Hit,
+    float& b2Hit,
+    const bool drawNodes /*= false*/,
+    const UINT gsParamIndx /*= 0*/,
+    const UINT psParamIndx /*= 1*/,
+    const Colour& visitedNodeColour /*= Colour( 1.f, 1.f, 1.f, 1.f )*/,
+    const Colour& backtrackedNodeColour /*= Colour( 1.f, 0.f, 0.f, 1.f )*/,
+    const UINT haltLevel /*= std::numeric_limits<UINT>::max()*/,
+    const Mat4& viewProj /*= Mat4::Identity*/,
+    ID3D12GraphicsCommandList* pCmdList /*= nullptr*/ ) const
 {
-    if( !nodes ) return false;
     //ProfilePhase p( Prof::AccelIntersectP );
     // MBVH2 traversal loop
     const Vec3 invDir = Vec3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
     const int dirIsNeg[] = { invDir.x < 0, invDir.y < 0, invDir.z < 0 };
     UINT nodeId = 0, junk, hitPrimIndx;
-    UINT bitstack = 0, treeLevel = 0;
+    UINT bitstack = 0, treeLevel = 0, traversalLevel = 0;
     UINT /*parentId = 0,*/ siblingId = 0; // cached node links
-    const float oritMax = ray.tMax;
-    float tMin = ray.tMax, b1Hit, b2Hit;
+    //const float oritMax = ray.tMax;
+    //float tMin = ray.tMax, b1Hit, b2Hit;
     bool stopTraversal = false;
 
-    //for( ; ;)
     while( true )
     {
         // Inner node loop
@@ -946,11 +957,11 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
             // Check if either of the children will be hit.
             const UINT leftChildIndx = nodeId + 1;
             const UINT rightChildIndx = nodes[ nodeId ].secondChildOffset;
-            const Bounds3f leftBox = nodes[ leftChildIndx ].bounds;
-            const Bounds3f rightBox = nodes[ rightChildIndx ].bounds;
+            const Bounds3f& leftBox = nodes[ leftChildIndx ].bounds;
+            const Bounds3f& rightBox = nodes[ rightChildIndx ].bounds;
             float leftBoxt, rightBoxt;
-            const bool leftHit = leftBox.IntersectP( ray, invDir, dirIsNeg, leftBoxt ); //boxIntersect( ray, leftBox, invDir, dirIsNeg, leftBoxt );
-            const bool rightHit = rightBox.IntersectP( ray, invDir, dirIsNeg, rightBoxt ); //boxIntersect( ray, rightBox, invDir, dirIsNeg, rightBoxt );
+            const bool leftHit = leftBox.IntersectP( ray, invDir, dirIsNeg, leftBoxt );
+            const bool rightHit = rightBox.IntersectP( ray, invDir, dirIsNeg, rightBoxt );
 
             // Terminate this loop if neither of the children were hit.
             if( !leftHit && !rightHit )
@@ -987,7 +998,191 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
                 {
                     nodeId = rightChildIndx;
                 }
-                siblingId = nodes[ nodeId ].siblingOffset;                
+                siblingId = nodes[ nodeId ].siblingOffset;
+            }
+
+            // Moving to the next level of the tree.
+            ++treeLevel;
+
+            // Draw the current node if required.
+            if( drawNodes && traversalLevel == haltLevel )
+            {
+                drawBVHNode( viewProj, gsParamIndx, nodes[ nodeId ].bounds, psParamIndx, visitedNodeColour, pCmdList );
+            }
+
+            // Increment the traversal level.
+            ++traversalLevel;
+
+            // We've traversed as much of the tree as requested, no need to keep going.
+            if( traversalLevel > haltLevel )
+            {
+                stopTraversal = true;
+                break;
+            }
+        }
+
+        // Don't continue if we don't have to.
+        if( stopTraversal )
+            return;
+
+        // Leaf node
+        if( nodes[ nodeId ].nPrimitives > 0 )
+        {
+            // Process BVH node _node_ for traversal
+            float t, b1, b2;
+            for( UINT i = 0; i < nodes[ nodeId ].nPrimitives; ++i )
+            {
+                // Check if the i'th primitive is hit.
+                if( primitives[ nodes[ nodeId ].primitivesOffset + i ].IntersectP( vertexList, ray, t, b1, b2 ) )
+                {
+                    // Set tMin to t if it is lesser. This is to ensure that the closest primitive is hit.
+                    if( t < tMin )
+                    {
+                        tMin = t;
+                        hitPrimIndx = nodes[ nodeId ].primitivesOffset + i;
+                        b1Hit = b1;
+                        b2Hit = b2;
+
+                        // Draw the current node if required.
+                        if( drawNodes && traversalLevel == haltLevel )
+                        {
+                            drawBVHNode( viewProj, gsParamIndx, primitives[ nodes[ nodeId ].primitivesOffset + i ].bbox, psParamIndx, visitedNodeColour, pCmdList );
+                        }
+                    }
+                }
+            }
+            /*if( toVisitOffset == 0 ) break;
+            currentNodeIndex = nodesToVisit[ --toVisitOffset ];*/
+        }
+
+        // Backtrack
+        while( ( bitstack & 1 ) == 0 )
+        {
+            // All the nodes have been traversed, we're done.
+            if( bitstack == 0 )
+            {
+                stopTraversal = true;
+                break;
+            }
+
+            // Moving to the previous level of the tree.
+            --treeLevel;
+
+            // Set the current nodeId to that of the parent of current node.
+            nodeId = nodes[ nodeId ].parentOffset;
+            siblingId = nodes[ nodeId ].siblingOffset;
+            bitstack >>= 1;
+
+            // Draw the current node if required.
+            if( drawNodes && traversalLevel == haltLevel )
+            {
+                drawBVHNode( viewProj, gsParamIndx, nodes[ nodeId ].bounds, psParamIndx, backtrackedNodeColour, pCmdList );
+            }
+
+            // Increment the traversal level.
+            ++traversalLevel;
+
+            // We've traversed as much of the tree as requested, no need to keep going.
+            if( traversalLevel > haltLevel )
+            {
+                stopTraversal = true;
+                break;
+            }
+        }
+
+        // End the traversal if necessary.
+        if( stopTraversal )
+            return;
+
+        if( siblingId != 0 )
+            nodeId = siblingId;
+        bitstack ^= 1;
+    }
+}
+
+bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const
+{
+    if( !nodes ) return false;
+    //ProfilePhase p( Prof::AccelIntersectP );
+    const float oritMax = ray.tMax;
+    float tMin = ray.tMax, b1Hit, b2Hit;
+
+    // Invoke the core traversal method.
+    traverseNodesStackless(
+        vertexList, 
+        ray, 
+        tMin, 
+        b1Hit, 
+        b2Hit );
+
+    // If tMin is no longer tMax, then we have intersected a primitive.
+    if( tMin < oritMax )
+    {
+        return true;
+    }
+
+    return false;
+
+#if 0
+    // MBVH2 traversal loop
+    const Vec3 invDir = Vec3( 1.f / ray.d.x, 1.f / ray.d.y, 1.f / ray.d.z );
+    const int dirIsNeg[] = { invDir.x < 0, invDir.y < 0, invDir.z < 0 };
+    UINT nodeId = 0, junk, hitPrimIndx;
+    UINT bitstack = 0, treeLevel = 0, traversalLevel = 0;
+    UINT /*parentId = 0,*/ siblingId = 0; // cached node links
+    bool stopTraversal = false;
+
+    //for( ; ;)
+    while( true )
+    {
+        // Inner node loop
+        while( nodes[ nodeId ].nPrimitives == 0 )
+        {
+            // Check if either of the children will be hit.
+            const UINT leftChildIndx = nodeId + 1;
+            const UINT rightChildIndx = nodes[ nodeId ].secondChildOffset;
+            const Bounds3f leftBox = nodes[ leftChildIndx ].bounds;
+            const Bounds3f rightBox = nodes[ rightChildIndx ].bounds;
+            float leftBoxt, rightBoxt;
+            const bool leftHit = leftBox.IntersectP( ray, invDir, dirIsNeg, leftBoxt );
+            const bool rightHit = rightBox.IntersectP( ray, invDir, dirIsNeg, rightBoxt );
+
+            // Terminate this loop if neither of the children were hit.
+            if( !leftHit && !rightHit )
+                break;
+
+            // Push a 0 onto the bitstack to indicate that we are going to traverse the next level of the tree.
+            bitstack <<= 1;
+
+            // If both children are hit, set nodeId to that of the left child.
+            if( leftHit && rightHit )
+            {
+                // Set nodeId to that of the nearest child node.
+                if( leftBoxt < rightBoxt )
+                {
+                    nodeId = leftChildIndx;
+                }
+                else
+                {
+                    nodeId = rightChildIndx;
+                }
+                siblingId = nodes[ nodeId ].siblingOffset;
+
+                // Set the lowest bit of the bitstack to 1 to indicate that the near child has been traversed.
+                bitstack |= 1;
+            }
+            else
+            {
+                // Set nodeId to that of the intersected child.
+                if( leftHit )
+                {
+                    nodeId = leftChildIndx;
+                }
+                else
+                {
+                    nodeId = rightChildIndx;
+                }
+                siblingId = nodes[ nodeId ].siblingOffset;
             }
 
             // Moving to the next level of the tree.
@@ -1032,7 +1227,7 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
             // Set the current nodeId to that of the parent of current node.
             nodeId = nodes[ nodeId ].parentOffset;
             siblingId = nodes[ nodeId ].siblingOffset;
-            bitstack >>= 1;            
+            bitstack >>= 1;
         }
 
         // End the traversal if necessary.
@@ -1044,39 +1239,40 @@ bool BVHAccel::IntersectStacklessP( const std::vector<ModelVertex>& vertexList, 
             nodeId = siblingId;
         bitstack ^= 1;
     }
+#endif // 0    
+}
 
-    // If tMin is no longer tMax, then we have intersected a primitive.
-    if( tMin < oritMax )
-    {
-        //// Triangle's colour.
-        //float4 LColor = gVertexBuffer[ gPrimitives[ hitPrimIndx ].p0 ].color;
+void BVHAccel::drawIntersectedNodesStackless(
+    const std::vector<ModelVertex>& vertexList,
+    const Ray& ray,
+    const Mat4& viewProj,
+    const UINT gsParamIndx,
+    const UINT psParamIndx,
+    const Colour visitedNodesColour,
+    const Colour backtrackedNodesColour,
+    const int haltLevel,
+    ID3D12GraphicsCommandList* pCmdList ) const
+{
+    if( !nodes ) return;
+    //ProfilePhase p( Prof::AccelIntersectP );
+    const float oritMax = ray.tMax;
+    float tMin = ray.tMax, b1Hit, b2Hit;
 
-        //// Triangle's transformed surface normal.
-        //Vec3 N =
-        //    b1Hit * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p0 ].normal +
-        //    b2Hit * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p1 ].normal +
-        //    ( 1 - b1Hit - b2Hit ) * gVertexBuffer[ gPrimitives[ hitPrimIndx ].p2 ].normal;
-        //N = mul( N, (float3x3)gWorldInvTranspose );
-
-        //// Half-way vector.
-        //Vec3 hitPt = ray.o + tMin * ray.d;
-        //Vec3 V = normalize( ray.o - hitPt );
-        //Vec3 H = normalize( L + V );
-
-        //// TODO: Remove when done testing.
-        ////// Check if the triangle has a diffuse component.
-        ////if( dot( -N, -L ) > 0 /*|| dot( N, ray.d ) < 0*/ )
-        ////{
-        ////    color = float4( 1, 0, 0, 1 );
-        ////}
-
-        //// Compute Phong-blinn shading for the intersected triangle.
-        //color = calcBlinnPhongLighting( M, LColor, AColor, N, L, H );
-        
-        return true;
-    }
-
-    return false;
+    // Invoke the core traversal method.
+    traverseNodesStackless(
+        vertexList,
+        ray,
+        tMin,
+        b1Hit,
+        b2Hit,
+        true,
+        gsParamIndx,
+        psParamIndx,
+        visitedNodesColour,
+        backtrackedNodesColour,
+        haltLevel,
+        viewProj,
+        pCmdList );
 }
 
 #if 0
@@ -1115,7 +1311,7 @@ void BVHAccel::PopShortStack( const uint32_t rootLevel, uint32_t& popLevel, uint
 #endif // 0
 
 
-void BVHAccel::drawNodes( const Mat4& viewProj, const UINT rootParamIndx, ID3D12GraphicsCommandList* pCmdList ) const
+void BVHAccel::drawBVHNodes( const Mat4& viewProj, const UINT gsParamIndx, const Bounds3f& bounds, const UINT psParamIndx, const Colour& colour, ID3D12GraphicsCommandList* pCmdList ) const
 {
     if( !nodes ) return;
     //ProfilePhase p( Prof::AccelIntersectP );
@@ -1126,30 +1322,38 @@ void BVHAccel::drawNodes( const Mat4& viewProj, const UINT rootParamIndx, ID3D12
     {
         // Draw the bounds for this node.
         const LinearBVHNode *node = &nodes[ currentNodeIndex ];
-        dBounds.pMin = node->bounds.pMin;
+        drawBVHNode( viewProj, gsParamIndx, node->bounds, psParamIndx, colour, pCmdList );
+#if 0
+        /*dBounds.pMin = node->bounds.pMin;
         dBounds.pMax = node->bounds.pMax;
         dBounds.viewProj = viewProj.Transpose();
         pCmdList->SetGraphicsRoot32BitConstants(
-            rootParamIndx,
+            gsParamIndx,
             sizeof( DebugBounds ) / sizeof( UINT ),
             &dBounds,
             0 );
-        pCmdList->DrawInstanced( 2, 1, 0, 0 );
+        pCmdList->DrawInstanced( 2, 1, 0, 0 );*/
+#endif // 0
+
 
         // Draw the bounds of all the primitives under this node.
         if( node->nPrimitives > 0 )
         {   
             for( int i = 0; i < node->nPrimitives; ++i )
             {
-                dBounds.pMin = primitives[ node->primitivesOffset + i ].bbox.pMin;
+                drawBVHNode( viewProj, gsParamIndx, primitives[ node->primitivesOffset + i ].bbox, psParamIndx, colour, pCmdList );
+#if 0
+                /*dBounds.pMin = primitives[ node->primitivesOffset + i ].bbox.pMin;
                 dBounds.pMax = primitives[ node->primitivesOffset + i ].bbox.pMax;
                 dBounds.viewProj = viewProj.Transpose();
                 pCmdList->SetGraphicsRoot32BitConstants(
-                    rootParamIndx,
+                    gsParamIndx,
                     sizeof( DebugBounds ) / sizeof( UINT ),
                     &dBounds,
                     0 );
-                pCmdList->DrawInstanced( 2, 1, 0, 0 );
+                pCmdList->DrawInstanced( 2, 1, 0, 0 );*/
+#endif // 0
+
             }
             if( toVisitOffset == 0 ) break;
             currentNodeIndex = nodesToVisit[ --toVisitOffset ];
@@ -1188,6 +1392,26 @@ BVHAccelPtr CreateBVHAccelerator(
     }*/
 
     //int maxPrimsInNode = ps.FindOneInt("maxnodeprims", 4);    
+}
+
+void BVHAccel::drawBVHNode( const Mat4& viewProj, const UINT gsParamIndx, const Bounds3f& bounds, const UINT psParamIndx, const Colour& colour, ID3D12GraphicsCommandList* pCmdList ) const
+{
+    // Set the GS params.
+    const DebugBounds dBounds = { bounds.pMin, 0, bounds.pMax, 0, viewProj.Transpose() };
+    pCmdList->SetGraphicsRoot32BitConstants(
+        gsParamIndx,
+        sizeof( DebugBounds ) / sizeof( UINT ),
+        &dBounds,
+        0 );
+
+    // Set the PS params.
+    pCmdList->SetGraphicsRoot32BitConstants(
+        psParamIndx,
+        sizeof( Colour ) / sizeof( UINT ),
+        &colour,
+        0 );
+
+    pCmdList->DrawInstanced( 2, 1, 0, 0 );
 }
 
 }   // end of namespace rsmgpt

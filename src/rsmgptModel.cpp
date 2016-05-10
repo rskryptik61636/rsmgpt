@@ -110,7 +110,7 @@ namespace rsmgpt
                     233.f / 255.f, 
                     1.f );  // Default to snow colour.
                 currVertex.color = ( pCurrMesh->HasVertexColors( 0 ) ?
-                    Color( pCurrMesh->mColors[ 0 ][ j ].r, pCurrMesh->mColors[ 0 ][ j ].g, pCurrMesh->mColors[ 0 ][ j ].b, pCurrMesh->mColors[ 0 ][ j ].a ) :
+                    Colour( pCurrMesh->mColors[ 0 ][ j ].r, pCurrMesh->mColors[ 0 ][ j ].g, pCurrMesh->mColors[ 0 ][ j ].b, pCurrMesh->mColors[ 0 ][ j ].a ) :
                     defaultColour );
 
                 //mVertexList.push_back( currVertex );

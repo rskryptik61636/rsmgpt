@@ -162,7 +162,7 @@ struct AccelDebug
     float tMin;
 };
 
-#define MachineEpsilon 1e-10 * 0.5
+#define MachineEpsilon /*pow(2,-24)*/ 1e-10 * 0.5
 
 float gamma( int n )
 {
@@ -268,7 +268,7 @@ bool triangleIntersectWithBackFaceCulling( inout Ray ray, in Triangle tri, out f
 
     // Compute the det = (e1.s1). Reject if < 0.
     const float det = dot( e1, s1 );
-    if( det < 0.000001f )
+    if( det < 1e-10 )
     {
         return false;
     }
@@ -344,15 +344,21 @@ bool triangleIntersectWithoutBackFaceCulling( in Ray ray, in Triangle tri, out f
     return true;
 }
 
+// Taken from the Robust BVH traversal paper.
+float addUlpMag( float f, int ulps )
+{
+    return asfloat( asuint( f ) + ulps );
+}
+
 // Ray - box intersection test.
 // NOTE: Adapted from Bounds3f IntersectP (see bvh.h)
-bool boxIntersect( in Ray ray, in Bounds bounds, in float3 invDir, in int3 dirIsNeg, inout float tMin )
+bool boxIntersect( in Ray ray, in Bounds bounds, in float3 invDir, in float3 invDirPad, in int3 dirIsNeg, inout float tMin )
 {
     // Check for ray intersection against $x$ and $y$ slabs
     /*float*/ tMin = ( getBoundsPt( bounds, dirIsNeg[ 0 ] ).x - ray.o.x ) * invDir.x;
-    float tMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 0 ] ).x - ray.o.x ) * invDir.x;
+    float tMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 0 ] ).x - ray.o.x ) * invDirPad.x;
     float tyMin = ( getBoundsPt( bounds, dirIsNeg[ 1 ] ).y - ray.o.y ) * invDir.y;
-    float tyMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 1 ] ).y - ray.o.y ) * invDir.y;
+    float tyMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 1 ] ).y - ray.o.y ) * invDirPad.y;
 
     // Update _tMax_ and _tyMax_ to ensure robust bounds intersection
     tMax *= 1 + 2 * gamma( 3 );
@@ -363,7 +369,7 @@ bool boxIntersect( in Ray ray, in Bounds bounds, in float3 invDir, in int3 dirIs
 
     // Check for ray intersection against $z$ slab
     float tzMin = ( getBoundsPt( bounds, dirIsNeg[ 2 ] ).z - ray.o.z ) * invDir.z;
-    float tzMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 2 ] ).z - ray.o.z ) * invDir.z;
+    float tzMax = ( getBoundsPt( bounds, 1 - dirIsNeg[ 2 ] ).z - ray.o.z ) * invDirPad.z;
 
     // Update _tzMax_ to ensure robust bounds intersection
     tzMax *= 1 + 2 * gamma( 3 );

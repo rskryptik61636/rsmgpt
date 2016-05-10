@@ -23,7 +23,7 @@
 #include "rsmgptBasicCommon.hlsli"
 
 // Bounds points and world transform.
-cbuffer DebugBounds : register( b0 )
+cbuffer DebugBounds : register( b0, space0 )
 {
     float3 pMin;
     float3 pMax;
@@ -32,12 +32,12 @@ cbuffer DebugBounds : register( b0 )
 
 [maxvertexcount(17)]
 void main(
-	point BBOX_VS_OUT input[1], 
-	inout LineStream< BBOX_PS_IN > output
+	point DEBUG_VS_OUT input[1],
+	inout LineStream< DEBUG_PS_IN > output
 )
 {
 	// Pt 0: (xmin, ymin, zmin)
-    BBOX_PS_IN vOut;
+    DEBUG_PS_IN vOut;
     vOut.position = mul( float4( pMin.x, pMin.y, pMin.z, 1.f ), gVP );
     output.Append( vOut );
 
