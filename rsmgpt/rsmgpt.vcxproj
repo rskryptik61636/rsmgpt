@@ -405,7 +405,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\scenes\cubeTestScene.json" />
+    <None Include="..\scenes\happyBuddhaTestScene.json" />
     <None Include="..\scenes\spiderTestScene.json" />
+    <None Include="..\scenes\stanfordBunnyTestScene.json" />
     <None Include="..\scenes\stanfordDragonTestScene1.json" />
     <None Include="..\src\rsmgptAccelStructureUtils.hlsli" />
     <None Include="..\src\rsmgptBasicCommon.hlsli" />

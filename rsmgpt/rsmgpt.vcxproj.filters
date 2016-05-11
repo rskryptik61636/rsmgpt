@@ -150,5 +150,11 @@
     <None Include="..\src\rsmgptAccelStructureUtils.hlsli">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="..\scenes\stanfordBunnyTestScene.json">
+      <Filter>Scenes</Filter>
+    </None>
+    <None Include="..\scenes\happyBuddhaTestScene.json">
+      <Filter>Scenes</Filter>
+    </None>
   </ItemGroup>
 </Project>
