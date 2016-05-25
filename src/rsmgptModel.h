@@ -117,6 +117,15 @@ private:
     // Helper function to transform a ModelVertex by the given transform.
     ModelVertex transVertex( const ModelVertex& vert, const Mat4& trans );
 
+    // Serialize the model.
+    void serialize( const path binPath );
+
+    // Deserialize the model.
+    void deserialize( const path binPath, ID3D12Device* pDevice, ID3D12GraphicsCommandList* pCmdList );
+
+    // Create the D3D resources.
+    void createD3DResources( ID3D12Device* pDevice, ID3D12GraphicsCommandList* pCmdList );
+
     // Model path
     path m_modelPath;
 

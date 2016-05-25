@@ -44,6 +44,22 @@ namespace rsmgpt
 
 #define MAKE_DEFAULT_CTOR(Type) Type() = default;
 
+#define MAKE_DEFAULT_DTOR(Type) ~Type() = default;
+
+#define DELETE_ALL_AUTODEFINED_CTORS(Type) \
+    Type() = delete;    \
+    Type( const Type& ) = delete;    \
+    Type( Type&& ) = delete;    \
+    Type& operator=( const Type& ) = delete;    \
+    Type& operator=( Type&& ) = delete;
+
+#define DEFAULT_ALL_PREDEFINED_CTORS(Type) \
+    Type() = default;    \
+    Type( const Type& ) = default;    \
+    Type( Type&& ) = default;    \
+    Type& operator=( const Type& ) = default;    \
+    Type& operator=( Type&& ) = default;
+
     // Math typedefs.
     namespace Math = DirectX::SimpleMath;
     typedef Math::Vector2 Vec2;

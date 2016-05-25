@@ -158,7 +158,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Main.cpp" />
+    <ClCompile Include="rsmgpt_sandbox.cpp" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="..\src\rsmgptAccelStructureDebugCS.hlsl">

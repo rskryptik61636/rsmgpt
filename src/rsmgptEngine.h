@@ -205,10 +205,10 @@ namespace rsmgpt {
         ComPtr<ID3D12CommandAllocator> m_computeCommandAllocators[ m_frameCount ];
         ComPtr<ID3D12CommandQueue> m_commandQueue;
         ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
-        RootSignature m_rsGfxDraw;
-        RootSignature m_rsDebugRay;
-        RootSignature m_rsDebugBounds;
-        RootSignature m_rsCompute;
+        RootSignaturePtr m_rsGfxDraw;
+        RootSignaturePtr m_rsDebugRay;
+        RootSignaturePtr m_rsDebugBounds;
+        RootSignaturePtr m_rsCompute;
         ComPtr<ID3D12CommandSignature> m_commandSignature;
         CsuDescriptorHeapPtr m_pCsuHeap;
         RtvDescriptorHeapPtr m_pRtvHeap;

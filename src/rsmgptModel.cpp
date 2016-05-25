@@ -42,127 +42,142 @@ namespace rsmgpt
         m_numFaces( 0 ),
         m_isDrawable( isDrawable )
     {
-        // Create an importer and read the model.
-        Assimp::Importer importer;
-        importer.ReadFile( m_modelPath.generic_string(), uiImportOptions );
+        // Serialized file path = model_file_name.bin.
+        const path binPath = path( modelPath.parent_path() / path( modelPath.stem().generic_string() + ".bin" ) );
 
-        // NOTE: V. V. IMP to ensure that GetOrphanedScene() is called as that will result
-        // in m_pModelScene taking ownership of the aiScene object. Otherwise, the aiScene object
-        // will be destroyed once it goes out of scope.
-        m_pModelScene.reset( importer.GetOrphanedScene() );	
-
-        // TODO: Need to implement loading of textures.
-
-        // TODO: Vertex and index loading needs to be updated for multiple meshes.
-                                                        
-        // Initialize the vertex and index lists.
-        UINT currVertexOffset( 0 ), currIndexOffset( 0 );
-        m_meshes.resize( m_pModelScene->mNumMeshes );
-
-        // Size m_indexList to the appropriate length.
-        auto nVertices( 0 ), nIndices( 0 ), nFaces( 0 );
-        for( unsigned int i = 0; i < m_pModelScene->mNumMeshes; ++i )
+        // Create the model from scratch if the serialized model doesn't exist.
+        if( std::experimental::filesystem::exists( binPath ) )
         {
-            auto& pCurrMesh = m_pModelScene->mMeshes[ i ];
-            nVertices += pCurrMesh->mNumVertices;
-            for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
-            {
-                nIndices += pCurrMesh->mFaces[ j ].mNumIndices;
-            }
-            nFaces += pCurrMesh->mNumFaces;
-        }
-        m_vertexList.resize( nVertices );
-        m_indexList.resize( nIndices );
-        m_ppPrimitives.reserve( nFaces );
-
-        for( unsigned int i = 0, vert = 0, indx = 0; i < m_pModelScene->mNumMeshes; ++i )
-        {
-            // Add all the vertices of the current mesh.
-            const aiMesh *pCurrMesh = m_pModelScene->mMeshes[ i ];
-            //m_vertexList.resize( pCurrMesh->mNumVertices );
-            for( unsigned int j = 0; j < pCurrMesh->mNumVertices; ++j )
-            {
-                //ModelVertex currVertex;
-                auto& currVertex = m_vertexList[ vert++ ];
-                currVertex.position = Vec3( pCurrMesh->mVertices[ j ].x, pCurrMesh->mVertices[ j ].y, pCurrMesh->mVertices[ j ].z );
-
-                currVertex.tangent = ( pCurrMesh->HasTangentsAndBitangents() ?
-                    Vec3( pCurrMesh->mTangents[ j ].x, pCurrMesh->mTangents[ j ].y, pCurrMesh->mTangents[ j ].z ) :
-                    Vec3( 0, 0, 0 ) );
-
-                currVertex.binormal = ( pCurrMesh->HasTangentsAndBitangents() ?
-                    Vec3( pCurrMesh->mBitangents[ j ].x, pCurrMesh->mBitangents[ j ].y, pCurrMesh->mBitangents[ j ].z ) :
-                    Vec3( 0, 0, 0 ) );
-
-                currVertex.normal = ( pCurrMesh->HasNormals() ?
-                    Vec3( pCurrMesh->mNormals[ j ].x, pCurrMesh->mNormals[ j ].y, pCurrMesh->mNormals[ j ].z ) :
-                    Vec3( 0, 0, 0 ) );
-
-                // NOTE: only dealing with the first channel of texcoords for now as that is the way it is being dealt with in the demo app
-                currVertex.texCoord = ( pCurrMesh->HasTextureCoords( 0 ) ?
-                    Vec2( pCurrMesh->mTextureCoords[ 0 ][ j ].x, pCurrMesh->mTextureCoords[ 0 ][ j ].y ) :
-                    Vec2( 0, 0 ) );
-
-                // NOTE: only dealing with the first channel of colors for now as that is the way it is being dealt with in the demo app
-                static const Vec4 defaultColour( 
-                    238.f / 255.f, 
-                    233.f / 255.f, 
-                    233.f / 255.f, 
-                    1.f );  // Default to snow colour.
-                currVertex.color = ( pCurrMesh->HasVertexColors( 0 ) ?
-                    Colour( pCurrMesh->mColors[ 0 ][ j ].r, pCurrMesh->mColors[ 0 ][ j ].g, pCurrMesh->mColors[ 0 ][ j ].b, pCurrMesh->mColors[ 0 ][ j ].a ) :
-                    defaultColour );
-
-                //mVertexList.push_back( currVertex );
-            }
-
-            // Set the vertex count and vertex start index of the current mesh.
-            m_meshes[ i ].vertexCount = pCurrMesh->mNumVertices;
-            m_meshes[ i ].vertexStart = currVertexOffset;
-            currVertexOffset += m_meshes[ i ].vertexCount;
-
-            // Set the no. of faces based of the current mesh.
-            m_numFaces += pCurrMesh->mNumFaces;
-
-            // Add all the face indices of the current mesh.
-            for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
-            {
-                const auto& currFace = pCurrMesh->mFaces[ j ];
-                for( unsigned int k = 0; k < currFace.mNumIndices; ++k )
-                    m_indexList[ indx++ ] = currFace.mIndices[ k ];
-                    //m_indexList.push_back( currFace.mIndices[ k ] );
-            }
-
-            // Set the index count and start index of the current mesh.
-            m_meshes[ i ].indexCount = pCurrMesh->mNumFaces * pCurrMesh->mFaces[ 0 ].mNumIndices;
-            m_meshes[ i ].indexStart = currIndexOffset;
-            currIndexOffset += m_meshes[ i ].indexCount;
-
-            // Set the material index of the current mesh.
-            m_meshes[ i ].materialIndex = pCurrMesh->mMaterialIndex;
-        }
-
-        std::vector<Mat4> transStack;
-
-        // Construct the node tree of the model.
-        recursiveNodeConstructor( /*initialWorldTransform,*/ m_pModelScene->mRootNode, m_rootNode, transStack );
-
-        // Build the BVH acceleration structure.
-        if( accelType == "sah" )
-        {
-            m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::SAH, 4, pDevice, pCommandList );
-        }
-        else if( accelType == "hlbvh" )
-        {
-            m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::HLBVH, 4, pDevice, pCommandList );
+            deserialize( binPath, pDevice, pCommandList );
         }
         else
         {
-            throw( "Unsupported acceleration structure!" );
-        }
+            // Create an importer and read the model.
+            Assimp::Importer importer;
+            importer.ReadFile( m_modelPath.generic_string(), uiImportOptions );
 
-        // @TODO: add implementation here
+            // NOTE: V. V. IMP to ensure that GetOrphanedScene() is called as that will result
+            // in m_pModelScene taking ownership of the aiScene object. Otherwise, the aiScene object
+            // will be destroyed once it goes out of scope.
+            m_pModelScene.reset( importer.GetOrphanedScene() );	
 
+            // Initialize the vertex and index lists.
+            UINT currVertexOffset( 0 ), currIndexOffset( 0 );
+            m_meshes.resize( m_pModelScene->mNumMeshes );
+
+            // Size m_indexList to the appropriate length.
+            auto nVertices( 0 ), nIndices( 0 ), nFaces( 0 );
+            for( unsigned int i = 0; i < m_pModelScene->mNumMeshes; ++i )
+            {
+                auto& pCurrMesh = m_pModelScene->mMeshes[ i ];
+                nVertices += pCurrMesh->mNumVertices;
+                for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
+                {
+                    nIndices += pCurrMesh->mFaces[ j ].mNumIndices;
+                }
+                nFaces += pCurrMesh->mNumFaces;
+            }
+            m_vertexList.resize( nVertices );
+            m_indexList.resize( nIndices );
+            m_ppPrimitives.reserve( nFaces );
+
+            for( unsigned int i = 0, vert = 0, indx = 0; i < m_pModelScene->mNumMeshes; ++i )
+            {
+                // Add all the vertices of the current mesh.
+                const aiMesh *pCurrMesh = m_pModelScene->mMeshes[ i ];
+                //m_vertexList.resize( pCurrMesh->mNumVertices );
+                for( unsigned int j = 0; j < pCurrMesh->mNumVertices; ++j )
+                {
+                    //ModelVertex currVertex;
+                    auto& currVertex = m_vertexList[ vert++ ];
+                    currVertex.position = Vec3( pCurrMesh->mVertices[ j ].x, pCurrMesh->mVertices[ j ].y, pCurrMesh->mVertices[ j ].z );
+
+                    currVertex.tangent = ( pCurrMesh->HasTangentsAndBitangents() ?
+                        Vec3( pCurrMesh->mTangents[ j ].x, pCurrMesh->mTangents[ j ].y, pCurrMesh->mTangents[ j ].z ) :
+                        Vec3( 0, 0, 0 ) );
+
+                    currVertex.binormal = ( pCurrMesh->HasTangentsAndBitangents() ?
+                        Vec3( pCurrMesh->mBitangents[ j ].x, pCurrMesh->mBitangents[ j ].y, pCurrMesh->mBitangents[ j ].z ) :
+                        Vec3( 0, 0, 0 ) );
+
+                    currVertex.normal = ( pCurrMesh->HasNormals() ?
+                        Vec3( pCurrMesh->mNormals[ j ].x, pCurrMesh->mNormals[ j ].y, pCurrMesh->mNormals[ j ].z ) :
+                        Vec3( 0, 0, 0 ) );
+
+                    // NOTE: only dealing with the first channel of texcoords for now as that is the way it is being dealt with in the demo app
+                    currVertex.texCoord = ( pCurrMesh->HasTextureCoords( 0 ) ?
+                        Vec2( pCurrMesh->mTextureCoords[ 0 ][ j ].x, pCurrMesh->mTextureCoords[ 0 ][ j ].y ) :
+                        Vec2( 0, 0 ) );
+
+                    // NOTE: only dealing with the first channel of colors for now as that is the way it is being dealt with in the demo app
+                    static const Vec4 defaultColour( 
+                        238.f / 255.f, 
+                        233.f / 255.f, 
+                        233.f / 255.f, 
+                        1.f );  // Default to snow colour.
+                    currVertex.color = ( pCurrMesh->HasVertexColors( 0 ) ?
+                        Colour( pCurrMesh->mColors[ 0 ][ j ].r, pCurrMesh->mColors[ 0 ][ j ].g, pCurrMesh->mColors[ 0 ][ j ].b, pCurrMesh->mColors[ 0 ][ j ].a ) :
+                        defaultColour );
+
+                    //mVertexList.push_back( currVertex );
+                }
+
+                // Set the vertex count and vertex start index of the current mesh.
+                m_meshes[ i ].vertexCount = pCurrMesh->mNumVertices;
+                m_meshes[ i ].vertexStart = currVertexOffset;
+                currVertexOffset += m_meshes[ i ].vertexCount;
+
+                // Set the no. of faces based of the current mesh.
+                m_numFaces += pCurrMesh->mNumFaces;
+
+                // Add all the face indices of the current mesh.
+                for( unsigned int j = 0; j < pCurrMesh->mNumFaces; ++j )
+                {
+                    const auto& currFace = pCurrMesh->mFaces[ j ];
+                    for( unsigned int k = 0; k < currFace.mNumIndices; ++k )
+                        m_indexList[ indx++ ] = currFace.mIndices[ k ];
+                        //m_indexList.push_back( currFace.mIndices[ k ] );
+                }
+
+                // Set the index count and start index of the current mesh.
+                m_meshes[ i ].indexCount = pCurrMesh->mNumFaces * pCurrMesh->mFaces[ 0 ].mNumIndices;
+                m_meshes[ i ].indexStart = currIndexOffset;
+                currIndexOffset += m_meshes[ i ].indexCount;
+
+                // Set the material index of the current mesh.
+                m_meshes[ i ].materialIndex = pCurrMesh->mMaterialIndex;
+            }
+
+            std::vector<Mat4> transStack;
+
+            // Construct the node tree of the model.
+            recursiveNodeConstructor( /*initialWorldTransform,*/ m_pModelScene->mRootNode, m_rootNode, transStack );
+
+            // Build the BVH acceleration structure.
+            if( accelType == "sah" )
+            {
+                m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::SAH, 4, pDevice, pCommandList );
+            }
+            else if( accelType == "hlbvh" )
+            {
+                m_pAccel = CreateBVHAccelerator( m_ppPrimitives, BVHAccel::SplitMethod::HLBVH, 4, pDevice, pCommandList );
+            }
+            else
+            {
+                throw( "Unsupported acceleration structure!" );
+            }
+
+            // Create the D3D resources.
+            createD3DResources( pDevice, pCommandList );
+
+            // Serialize the model.
+            serialize( binPath );
+        }        
+    }
+
+    // Create the D3D resources.
+    void Model::createD3DResources( ID3D12Device* pDevice, ID3D12GraphicsCommandList* pCmdList )
+    {
         // Create the vertex buffer.
         const size_t vertexBufferSize = m_vertexList.size() * sizeof( ModelVertex );
         createCommittedDefaultBuffer(
@@ -173,7 +188,7 @@ namespace rsmgpt
             D3D12_RESOURCE_FLAG_NONE,
             0,
             nullptr,
-            pCommandList,
+            pCmdList,
             m_pVertexUploadBuffer,
             m_vertexList.data() );
 
@@ -194,7 +209,7 @@ namespace rsmgpt
                 D3D12_RESOURCE_FLAG_NONE,
                 0,
                 nullptr,
-                pCommandList,
+                pCmdList,
                 m_pIndexUploadBuffer,
                 m_indexList.data() );
 
@@ -224,11 +239,156 @@ namespace rsmgpt
                     D3D12_RESOURCE_STATE_COPY_DEST,
                     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE )
             };
-        } 
+        }
 
-        pCommandList->ResourceBarrier( 
-            static_cast<UINT>( m_srvBarriers.size() ), 
+        pCmdList->ResourceBarrier(
+            static_cast<UINT>( m_srvBarriers.size() ),
             m_srvBarriers.data() );
+    }
+
+    // Serialize the model.
+    void Model::serialize( const path binPath )
+    {
+        // Open the serialized file.
+        FILE* fp = nullptr;
+        fopen_s( &fp, binPath.generic_string().c_str(), "wb" );
+
+        // 1. No. of vertices/indices/faces/meshes/primitives/BVH nodes
+        const std::size_t
+            nVerts = numVertices(),
+            nIndices = numIndices(),
+            nFaces = numFaces(),
+            nMeshes = m_meshes.size(),
+            nPrimitives = numPrimitives(),
+            nBVHNodes = accel()->nBVHNodes();
+        fwrite( &nVerts, sizeof( std::size_t ), 1, fp );
+        fwrite( &nIndices, sizeof( std::size_t ), 1, fp );
+        fwrite( &nFaces, sizeof( std::size_t ), 1, fp );
+        fwrite( &nMeshes, sizeof( std::size_t ), 1, fp );
+        fwrite( &nPrimitives, sizeof( std::size_t ), 1, fp );
+        fwrite( &nBVHNodes, sizeof( std::size_t ), 1, fp );
+
+        // 2. Vertex list
+        const void* pData = m_vertexList.data();
+        fwrite( pData, sizeof( ModelVertex ), nVerts, fp );
+
+        // 3. Index list (may be empty if the model is not drawable)
+        pData = m_indexList.data();
+        fwrite( pData, sizeof( unsigned int ), nIndices, fp );
+        
+        // 4. Mesh list
+        pData = m_meshes.data();
+        fwrite( pData, sizeof( ModelMesh ), nMeshes, fp );
+
+        // 5. Primitive list
+        pData = m_ppPrimitives.data();
+        fwrite( pData, sizeof( Primitive ), nPrimitives, fp );
+
+        // 6. Ordered primitive list.
+        pData = accel()->pPrimitives();
+        fwrite( pData, sizeof( Primitive ), nPrimitives, fp );
+
+        // 7. Flattened BVH tree
+        pData = accel()->pNodes();
+        fwrite( pData, accel()->nodeSize(), nBVHNodes, fp );
+
+        // Close the serialized file.
+        fclose( fp );
+
+        // TODO: Uncomment to validate the serialization.
+#if 0
+        fopen_s( &fp, binPath.generic_string().c_str(), "rb" );
+
+        // 1. No. of vertices/indices/faces/meshes/primitives/BVH nodes
+        std::size_t test;
+#define VALIDATE_COUNT(exp) \
+    fread( &test, sizeof( std::size_t ), 1, fp );   \
+    assert( test == exp );
+
+        VALIDATE_COUNT( nVerts );
+        VALIDATE_COUNT( nIndices );
+        VALIDATE_COUNT( nFaces );
+        VALIDATE_COUNT( nMeshes );
+        VALIDATE_COUNT( nPrimitives );
+        VALIDATE_COUNT( nBVHNodes );
+
+#undef VALIDATE_COUNT
+
+        std::vector<BYTE> test2;
+#define VALIDATE_DATA(count, unitSize, expData)  \
+    test2.resize( unitSize * count ); \
+    fread( test2.data(), unitSize, count, fp ); \
+    assert( memcmp( expData, test2.data(), count * unitSize ) == 0 );
+
+        // 2. Vertex list
+        VALIDATE_DATA( nVerts, sizeof( ModelVertex ), m_vertexList.data() );
+
+        // 3. Index list (may be empty if the model is not drawable)
+        VALIDATE_DATA( nIndices, sizeof( unsigned int ), m_indexList.data() );
+
+        // 4. Mesh list
+        VALIDATE_DATA( nMeshes, sizeof( ModelMesh ), m_meshes.data() );
+
+        // 5. Primitive list
+        VALIDATE_DATA( nPrimitives, sizeof( Primitive ), m_ppPrimitives.data() );
+
+        // 6. Ordered primitive list.
+        VALIDATE_DATA( nPrimitives, sizeof( Primitive ), accel()->pPrimitives() );
+
+        // 7. Flattened BVH tree
+        VALIDATE_DATA( nBVHNodes, accel()->nodeSize(), accel()->pNodes() );
+
+#undef VALIDATE_DATA
+
+        fclose( fp );
+#endif // 0
+
+    }
+
+    // Deserialize the model.
+    void Model::deserialize( const path binPath, ID3D12Device* pDevice, ID3D12GraphicsCommandList* pCmdList )
+    {
+        // Deserialize the model.
+        std::size_t
+            nVerts,
+            nIndices,
+            nMeshes,
+            nPrimitives,
+            nBVHNodes;
+        FILE* fp = nullptr;
+        fopen_s( &fp, binPath.generic_string().c_str(), "rb" );
+
+        // Get the no. of vertices/indices/faces/meshes/primitives/BVH nodes.
+        fread( &nVerts, sizeof( std::size_t ), 1, fp );
+        fread( &nIndices, sizeof( std::size_t ), 1, fp );
+        fread( &m_numFaces, sizeof( std::size_t ), 1, fp );
+        fread( &nMeshes, sizeof( std::size_t ), 1, fp );
+        fread( &nPrimitives, sizeof( std::size_t ), 1, fp );
+        fread( &nBVHNodes, sizeof( std::size_t ), 1, fp );
+
+        // Read the vertex list.
+        m_vertexList.resize( nVerts );
+        fread( m_vertexList.data(), sizeof( ModelVertex ), nVerts, fp );
+
+        // Read the index list.
+        m_indexList.resize( nIndices );
+        fread( m_indexList.data(), sizeof( unsigned int ), nIndices, fp );
+
+        // Read the mesh list.
+        m_meshes.resize( nMeshes );
+        fread( m_meshes.data(), sizeof( ModelMesh ), nMeshes, fp );
+
+        // Read the primitive list.
+        m_ppPrimitives.resize( nPrimitives );
+        fread( m_ppPrimitives.data(), sizeof( Primitive ), nPrimitives, fp );
+
+        // Construct the BVH.
+        m_pAccel = CreateBVHAccelerator( nPrimitives, nBVHNodes, fp, pDevice, pCmdList );
+
+        fclose( fp );
+
+        // Create the D3D resources.
+        createD3DResources( pDevice, pCmdList );
     }
 
     // Recursive function which constructs the model's node tree.
@@ -402,4 +562,5 @@ namespace rsmgpt
         m_pVertexUploadBuffer.Reset();
         m_pIndexUploadBuffer.Reset();
     }
+
 }

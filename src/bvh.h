@@ -45,6 +45,7 @@
 #include "memory.h"
 #include "rsmgptDefns.h"
 #include "rsmgptGeometry.h"
+//#include "JsonSerializer.h"
 #include <atomic>
 
 namespace rsmgpt
@@ -97,6 +98,7 @@ public:
     {
     }
     Point3 operator()( float t ) const { return o + d * t; }
+    //void serialize( JsonSerializer& s );
     //bool HasNaNs() const { return ( o.HasNaNs() || d.HasNaNs() || isNaN( tMax ) ); }  // TODO: Re-enable once HasNaNs implementation is available.
     /*friend std::ostream &operator<<( std::ostream &os, const Ray &r )
     {
@@ -388,14 +390,25 @@ class BVHAccel /*: public Aggregate*/ {
              ID3D12GraphicsCommandList* pCmdList,
              int maxPrimsInNode = 1,
              SplitMethod splitMethod = SplitMethod::SAH);
+
+    // Deserialize flattened BVH tree from file.
+    BVHAccel(
+        const int nPrimitives,
+        const int totalNodes,
+        FILE* fpNodes,
+        ID3D12Device* pDevice,
+        ID3D12GraphicsCommandList* pCmdList );
+
     Bounds3f WorldBound() const;
     ~BVHAccel();
 
     ID3D12Resource* primitivesResource() const { return m_pPrimsBuffer.Get(); }
     const size_t nPrimitives() const { return primitives.size(); }
+    const Primitive* pPrimitives() const { return primitives.data(); }
     const UINT primitiveSize() const { return sizeof( Primitive ); }
     ID3D12Resource* nodesResource() const { return m_pNodesBuffer.Get(); }
     const int nBVHNodes() const { return totalNodes; }
+    const LinearBVHNode* pNodes() const { return nodes; }
     const UINT nodeSize() const;    // NOTE: Defining in bvh.cpp because that is where LinearBVHNode is defined.
 
     bool IntersectP( const std::vector<ModelVertex>& vertexList, const Ray& ray, Primitive& hitPrim, float& t, float& b1, float& b2 ) const;    
@@ -456,6 +469,11 @@ class BVHAccel /*: public Aggregate*/ {
         const Mat4& viewProj = Mat4::Identity,
         ID3D12GraphicsCommandList* pCmdList = nullptr ) const;
 
+    // Create D3D12 resources.
+    void createD3DResources(
+        ID3D12Device* pDevice,
+        ID3D12GraphicsCommandList* pCmdList );
+
     // BVHAccel Private Data
     const int maxPrimsInNode;
     const SplitMethod splitMethod;
@@ -470,6 +488,13 @@ BVHAccelPtr CreateBVHAccelerator(
     const PrimitiveList &prims, 
     const BVHAccel::SplitMethod splitMethod, 
     const int maxPrimsInNode,
+    ID3D12Device* pDevice,
+    ID3D12GraphicsCommandList* pCmdList );
+
+BVHAccelPtr CreateBVHAccelerator(
+    const int nPrimitives,
+    const int totalNodes,
+    FILE* fpNodes,
     ID3D12Device* pDevice,
     ID3D12GraphicsCommandList* pCmdList );
 

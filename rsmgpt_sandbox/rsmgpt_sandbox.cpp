@@ -1,3 +1,25 @@
+/******************************************************************************
+* Copyright (c) 2015-2016 Madayi Kolangarakath Rohit Shrinath
+*
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included in
+* all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+* THE SOFTWARE.
+******************************************************************************/
+
 #include <stdafx.h>
 #include <rsmgptDefns.h>
 #include <rsmgptCamera.h>
@@ -480,29 +502,38 @@ int main( int argc, char *argv[] )
         model.releaseUploadBuffers();
 
         // Create root signature.
-        RootSignature computeRootSignature;
-        computeRootSignature.reset( 3, 0 );
+        RootSignaturePtr rsCompute(new RootSignature( 3, 0 ) );
+        //computeRootSignature.reset( 3, 0 );
 
         // AccelStructureDebug root signature.
         // b0: cbDebugRay (just the ray)
-        computeRootSignature[ 0 ].InitAsConstants( sizeof( Ray ) / sizeof( UINT ), 0 );
+        rsCompute->addConstants( "cbDebugRay", sizeof( Ray ) / sizeof( UINT ), 0 );
+        //rsCompute[ 0 ].InitAsConstants( sizeof( Ray ) / sizeof( UINT ), 0 );
 
         // t0: gVertexBuffer (from accel)
         // t1: gPrimitives (from accel)
         // t2: gBVHNodes (from accel)
-        CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0 );
-        computeRootSignature[ 1 ].InitAsDescriptorTable( 1, &srvTable );
+        //CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0 );
+        rsCompute->addDescriptorTable( 
+            "srvs", 
+            1, 
+            &CD3DX12_DESCRIPTOR_RANGE( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0 ) );
+        //rsCompute[ 1 ].InitAsDescriptorTable( 1, &srvTable );
 
         // u0: gRayHit (result of the ray intersection, need default and readback resources for this)
         // u1: gAccelDebug (debug info, need default and readback resources for this)
         CD3DX12_DESCRIPTOR_RANGE uavTable( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0 );
-        computeRootSignature[ 2 ].InitAsDescriptorTable( 1, &uavTable );
+        rsCompute->addDescriptorTable( 
+            "uavs", 
+            1, 
+            &CD3DX12_DESCRIPTOR_RANGE( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0 ) );
+        //rsCompute[ 2 ].InitAsDescriptorTable( 1, &uavTable );
 
-        computeRootSignature.finalize( device.Get() );
+        rsCompute->finalize( device.Get() );
 
         // Create PSO.
         D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
-        computePsoDesc.pRootSignature = computeRootSignature.get();
+        computePsoDesc.pRootSignature = rsCompute->pRootSignature();
         computePsoDesc.CS = { g_prsmgptAccelStructureDebugCS, _countof( g_prsmgptAccelStructureDebugCS ) };
 
         ComPtr<ID3D12PipelineState> pso;
@@ -609,7 +640,7 @@ int main( int argc, char *argv[] )
         commandList->Reset( commandAllocator.Get(), pso.Get() );
 
         // Set root signature, descriptor heaps.
-        commandList->SetComputeRootSignature( computeRootSignature.get() );
+        commandList->SetComputeRootSignature( rsCompute->pRootSignature() );
         ID3D12DescriptorHeap* descHeaps[] = { descHeap->getHeap() };
         commandList->SetDescriptorHeaps( 1, descHeaps );
 

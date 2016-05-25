@@ -154,18 +154,133 @@ namespace rsmgpt
         incrementHandles();
     }
 
-    RootSignature::RootSignature() :
+    /*RootSignature::RootSignature() :
         m_rootParams(),
         m_staticSamplers(),
         m_rootSignature( nullptr )
     {
 
-    }
+    }*/
 
-    void RootSignature::reset( const std::size_t nRootParams, const std::size_t nStaticSamplers )
+    // Param ctor accepting the no. of root parameters and static samplers.
+    RootSignature::RootSignature( 
+        const std::size_t nRootParams, 
+        const std::size_t nStaticSamplers ) :
+        m_rootParams( nRootParams ),
+        m_staticSamplers( nStaticSamplers ),
+        m_rootParamIndx( 0 ),
+        m_staticSamplerIndx( 0 ),
+        m_totalNumDescriptorRanges( 0 ),
+        m_rootSignature( nullptr )
+    { }
+
+    /*void RootSignature::reset( const std::size_t nRootParams, const std::size_t nStaticSamplers )
     {
         m_rootParams.resize( nRootParams );
         m_staticSamplers.resize( nStaticSamplers );
+    }*/
+
+    void RootSignature::addConstants(
+        const char* id,
+        UINT num32BitValues,
+        UINT shaderRegister,
+        UINT registerSpace /*= 0*/,
+        D3D12_SHADER_VISIBILITY visibility /*= D3D12_SHADER_VISIBILITY_ALL*/ )
+    {
+        m_rootParams[ m_rootParamIndx ].InitAsConstants(
+            num32BitValues,
+            shaderRegister,
+            registerSpace,
+            visibility );
+
+        addRootParamIdToMap( id );
+    }
+    void RootSignature::addDescriptorTable(
+        const char* id,
+        UINT numDescriptorRanges,
+        const D3D12_DESCRIPTOR_RANGE* pDescriptorRanges,
+        D3D12_SHADER_VISIBILITY visibility /*= D3D12_SHADER_VISIBILITY_ALL*/ )
+    {
+        m_rootParams[ m_rootParamIndx ].InitAsDescriptorTable(
+            numDescriptorRanges,
+            pDescriptorRanges,
+            visibility );
+
+        addRootParamIdToMap( id );
+
+        m_totalNumDescriptorRanges += numDescriptorRanges;
+    }
+    void RootSignature::addCBV(
+        const char* id,
+        UINT shaderRegister,
+        UINT registerSpace /*= 0*/,
+        D3D12_SHADER_VISIBILITY visibility /*= D3D12_SHADER_VISIBILITY_ALL*/ )
+    {
+        m_rootParams[ m_rootParamIndx ].InitAsConstantBufferView(
+            shaderRegister,
+            registerSpace,
+            visibility );
+
+        addRootParamIdToMap( id );
+    }
+    void RootSignature::addSRV(
+        const char* id,
+        UINT shaderRegister,
+        UINT registerSpace /*= 0*/,
+        D3D12_SHADER_VISIBILITY visibility /*= D3D12_SHADER_VISIBILITY_ALL*/ )
+    {
+        m_rootParams[ m_rootParamIndx ].InitAsShaderResourceView(
+            shaderRegister,
+            registerSpace,
+            visibility );
+
+        addRootParamIdToMap( id );
+    }
+    void RootSignature::addUAV(
+        const char* id,
+        UINT shaderRegister,
+        UINT registerSpace /*= 0*/,
+        D3D12_SHADER_VISIBILITY visibility /*= D3D12_SHADER_VISIBILITY_ALL*/ )
+    {
+        m_rootParams[ m_rootParamIndx ].InitAsUnorderedAccessView(
+            shaderRegister,
+            registerSpace,
+            visibility );
+
+        addRootParamIdToMap( id );
+    }
+    void RootSignature::addStaticSampler(
+        const char* id,
+        UINT shaderRegister,
+        D3D12_FILTER filter /*= D3D12_FILTER_ANISOTROPIC*/,
+        D3D12_TEXTURE_ADDRESS_MODE addressU /*= D3D12_TEXTURE_ADDRESS_MODE_WRAP*/,
+        D3D12_TEXTURE_ADDRESS_MODE addressV /*= D3D12_TEXTURE_ADDRESS_MODE_WRAP*/,
+        D3D12_TEXTURE_ADDRESS_MODE addressW /*= D3D12_TEXTURE_ADDRESS_MODE_WRAP*/,
+        FLOAT mipLODBias /*= 0*/,
+        UINT maxAnisotropy /*= 16*/,
+        D3D12_COMPARISON_FUNC comparisonFunc /*= D3D12_COMPARISON_FUNC_LESS_EQUAL*/,
+        D3D12_STATIC_BORDER_COLOR borderColor /*= D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE*/,
+        FLOAT minLOD /*= 0.f*/,
+        FLOAT maxLOD /*= D3D12_FLOAT32_MAX*/,
+        D3D12_SHADER_VISIBILITY shaderVisibility /*= D3D12_SHADER_VISIBILITY_ALL*/,
+        UINT registerSpace /*= 0*/ )
+    {
+        m_staticSamplers[ m_staticSamplerIndx ].Init(
+            shaderRegister,
+            filter,
+            addressU,
+            addressV,
+            addressW,
+            mipLODBias,
+            maxAnisotropy,
+            comparisonFunc,
+            borderColor,
+            minLOD,
+            maxLOD,
+            shaderVisibility,
+            registerSpace );
+
+        addStaticSamplerIdToMap( id );
     }
 
     void RootSignature::finalize( ID3D12Device* pDevice )
@@ -188,7 +303,7 @@ namespace rsmgpt
         ThrowIfFailed( pDevice->CreateRootSignature( 0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS( &m_rootSignature ) ) );
     }
 
-    ID3D12RootSignature* RootSignature::get()
+    ID3D12RootSignature* RootSignature::pRootSignature()
     {
         assert( m_rootSignature.Get() );
         return m_rootSignature.Get();

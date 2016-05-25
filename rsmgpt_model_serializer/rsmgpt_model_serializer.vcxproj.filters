@@ -15,10 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="..\src\rsmgptAccelStructureDebugCS.hlsl" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="rsmgpt_sandbox.cpp">
+    <ClCompile Include="rsmgpt_model_serializer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

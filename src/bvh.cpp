@@ -177,6 +177,13 @@ static void RadixSort(std::vector<MortonPrimitive> *v) {
     if (nPasses & 1) std::swap(*v, tempVector);
 }
 
+//// Ray struct member defns.
+//void Ray::serialize( JsonSerializer& s )
+//{
+//    s.Serialize( "origin", o );
+//
+//}
+
 // Primitive class member defns.
 
 Primitive::Primitive(
@@ -325,6 +332,49 @@ BVHAccel::BVHAccel(
                               &totalNodes, orderedPrims);
     primitives.swap(orderedPrims);
 
+    // Compute representation of depth-first traversal of BVH tree
+    /*treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
+    primitives.size() * sizeof(primitives[0]);*/   // TODO: treeBytes needs to be in thread local storage.
+    nodes = AllocAligned<LinearBVHNode>( totalNodes );
+    //::memset( nodes, 0, totalNodes * sizeof( LinearBVHNode ) );
+    int offset = 0, parentOffset = 0;
+    flattenBVHTree( parentOffset, root, &offset );
+    assert( offset == totalNodes );
+
+    // Create the D3D resources.
+    createD3DResources( pDevice, pCmdList );
+}
+
+BVHAccel::BVHAccel(
+    const int nPrimitives,
+    const int totalNodes,
+    FILE* fpNodes,
+    ID3D12Device* pDevice,
+    ID3D12GraphicsCommandList* pCmdList ) : 
+    maxPrimsInNode( 255 ),  // Doesn't matter here.
+    splitMethod( SplitMethod::HLBVH ), // Doesn't matter here.
+    totalNodes( totalNodes )
+{
+    /*OutputDebugStringA("BVH created with %d nodes for %d primitives (%.2f MB)", totalNodes,
+    (int)primitives.size(),
+    float(totalNodes * sizeof(LinearBVHNode)) / (1024.f * 1024.f));*/
+
+    // Read primitives and nodes from fpNodes.
+    primitives.resize( nPrimitives );
+    fread( primitives.data(), sizeof( Primitive ), nPrimitives, fpNodes );
+
+    nodes = AllocAligned<LinearBVHNode>( totalNodes );
+    fread( nodes, sizeof( LinearBVHNode ), totalNodes, fpNodes );
+
+    // Create the D3D resources.
+    createD3DResources( pDevice, pCmdList );
+}
+
+// Create D3D12 resources.
+void BVHAccel::createD3DResources(
+    ID3D12Device* pDevice,
+    ID3D12GraphicsCommandList* pCmdList )
+{
     // Create a buffer resource for primitives.
     createCommittedDefaultBuffer(
         pDevice,
@@ -337,20 +387,6 @@ BVHAccel::BVHAccel(
         pCmdList,
         m_pPrimsUpload,
         primitives.data() );
-
-    // TODO: totalNodes needs to be in thread local storage.
-    /*OutputDebugStringA("BVH created with %d nodes for %d primitives (%.2f MB)", totalNodes,
-         (int)primitives.size(),
-         float(totalNodes * sizeof(LinearBVHNode)) / (1024.f * 1024.f));*/
-
-    // Compute representation of depth-first traversal of BVH tree
-    /*treeBytes += totalNodes * sizeof(LinearBVHNode) + sizeof(*this) +
-                 primitives.size() * sizeof(primitives[0]);*/   // TODO: treeBytes needs to be in thread local storage.
-    nodes = AllocAligned<LinearBVHNode>(totalNodes);
-    //::memset( nodes, 0, totalNodes * sizeof( LinearBVHNode ) );
-    int offset = 0, parentOffset = 0;
-    flattenBVHTree(parentOffset, root, &offset);
-    assert(offset == totalNodes);
 
     // Create a buffer resource for nodes.
     createCommittedDefaultBuffer(
@@ -1374,24 +1410,17 @@ BVHAccelPtr CreateBVHAccelerator(
     ID3D12GraphicsCommandList* pCmdList ) {
     return std::make_shared<BVHAccel>( prims, pDevice, pCmdList, maxPrimsInNode, splitMethod );
 
-    // TODO: Remove when done testing.
-    //std::string splitMethodName = ps.FindOneString("splitmethod", "sah");
-    /*BVHAccel::SplitMethod splitMethod;
-    if (splitMethodName == "sah")
-        splitMethod = BVHAccel::SplitMethod::SAH;
-    else if (splitMethodName == "hlbvh")
-        splitMethod = BVHAccel::SplitMethod::HLBVH;
-    else if (splitMethodName == "middle")
-        splitMethod = BVHAccel::SplitMethod::Middle;
-    else if (splitMethodName == "equal")
-        splitMethod = BVHAccel::SplitMethod::EqualCounts;
-    else {
-        printf("BVH split method \"%s\" unknown.  Using \"sah\".",
-                splitMethodName.c_str());
-        splitMethod = BVHAccel::SplitMethod::SAH;
-    }*/
-
     //int maxPrimsInNode = ps.FindOneInt("maxnodeprims", 4);    
+}
+
+BVHAccelPtr CreateBVHAccelerator(
+    const int nPrimitives,
+    const int totalNodes,
+    FILE* fpNodes,
+    ID3D12Device* pDevice,
+    ID3D12GraphicsCommandList* pCmdList )
+{
+    return std::make_shared<BVHAccel>( nPrimitives, totalNodes, fpNodes, pDevice, pCmdList );
 }
 
 void BVHAccel::drawBVHNode( const Mat4& viewProj, const UINT gsParamIndx, const Bounds3f& bounds, const UINT psParamIndx, const Colour& colour, ID3D12GraphicsCommandList* pCmdList ) const

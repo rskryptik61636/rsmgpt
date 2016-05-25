@@ -141,40 +141,115 @@ namespace rsmgpt
     {
     public:
 
+        DELETE_ALL_AUTODEFINED_CTORS(RootSignature)
+        MAKE_DEFAULT_DTOR(RootSignature)
+
+        // Param ctor accepting the no. of root parameters and static samplers.
+        RootSignature( const std::size_t nRootParams, const std::size_t nStaticSamplers );
+
         // Default ctor.
-        RootSignature();
+        //RootSignature();
 
-        // Delete all the predefined ctors.
-        RootSignature( const RootSignature& ) = delete;
-        RootSignature( RootSignature&& ) = delete;
+        //// Delete all the predefined ctors.
+        //RootSignature( const RootSignature& ) = delete;
+        //RootSignature( RootSignature&& ) = delete;
 
-        // Delete all the predefined assigment operators.
-        RootSignature& operator=( const RootSignature& ) = delete;
-        RootSignature& operator=( RootSignature&& ) = delete;
+        //// Delete all the predefined assigment operators.
+        //RootSignature& operator=( const RootSignature& ) = delete;
+        //RootSignature& operator=( RootSignature&& ) = delete;
 
-        // Default impl for the dtor.
-        ~RootSignature() = default;
-
+        //// Default impl for the dtor.
+        //~RootSignature() = default;
+        
         // operator[] accesses the corresponding root parameter.
-        inline CD3DX12_ROOT_PARAMETER& operator[]( const std::size_t i ) { return m_rootParams[ i ]; }
-
-        // Initializes the given static sampler.
-        inline void initStaticSampler( const std::size_t i, CD3DX12_STATIC_SAMPLER_DESC samplerDesc )   { m_staticSamplers[ i ] = samplerDesc; }
+        //inline CD3DX12_ROOT_PARAMETER& operator[]( const std::size_t i ) { return m_rootParams[ i ]; }
 
         // Accessor for the root signature.
-        ID3D12RootSignature* get();
+        ID3D12RootSignature* pRootSignature();
 
+        // Gets the root parameter index.
+        inline UINT getRootParamIndex( const char* rootParamId ) const { return m_rootParamsMap.at( rootParamId ); }
+
+        // Gets the static sampler index.
+        inline UINT getStaticSamplerIndex( const char* samplerId ) const { return m_staticSamplersMap.at( samplerId ); }
+
+        // Mutator funcs to add different types of root parameters. The default values are the same as the ones that the corresponding CD3DX12ROOT_PARAMETER instances take.
+        void addConstants(
+            const char* id,
+            UINT num32BitValues,
+            UINT shaderRegister,
+            UINT registerSpace = 0,
+            D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_ALL );
+        void addDescriptorTable(
+            const char* id,
+            UINT numDescriptorRanges,
+            const D3D12_DESCRIPTOR_RANGE* pDescriptorRanges,
+            D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_ALL );
+        void addCBV(
+            const char* id,
+            UINT shaderRegister,
+            UINT registerSpace = 0,
+            D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_ALL );
+        void addSRV(
+            const char* id,
+            UINT shaderRegister,
+            UINT registerSpace = 0,
+            D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_ALL );
+        void addUAV(
+            const char* id,
+            UINT shaderRegister,
+            UINT registerSpace = 0,
+            D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_ALL );
+        void addStaticSampler(
+            const char* id,
+            UINT shaderRegister,
+            D3D12_FILTER filter = D3D12_FILTER_ANISOTROPIC,
+            D3D12_TEXTURE_ADDRESS_MODE addressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+            D3D12_TEXTURE_ADDRESS_MODE addressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+            D3D12_TEXTURE_ADDRESS_MODE addressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+            FLOAT mipLODBias = 0,
+            UINT maxAnisotropy = 16,
+            D3D12_COMPARISON_FUNC comparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL,
+            D3D12_STATIC_BORDER_COLOR borderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE,
+            FLOAT minLOD = 0.f,
+            FLOAT maxLOD = D3D12_FLOAT32_MAX,
+            D3D12_SHADER_VISIBILITY shaderVisibility = D3D12_SHADER_VISIBILITY_ALL,
+            UINT registerSpace = 0 );
+
+        // Initializes the given static sampler.
+        //inline void initStaticSampler( const std::size_t i, CD3DX12_STATIC_SAMPLER_DESC samplerDesc )   { m_staticSamplers[ i ] = samplerDesc; }
+        
         // Resizes the root parameter and static sampler vectors to the given sizes.
-        void reset( const std::size_t nRootParams, const std::size_t nStaticSamplers );
+        //void reset( const std::size_t nRootParams, const std::size_t nStaticSamplers );
 
         // Finalize method creates the actual root signature object.
         void finalize( ID3D12Device* pDevice );
 
     private:
 
+        // Add current ids to root params/static samplers maps and increments associated counters.
+        inline void addRootParamIdToMap( const char* id ) 
+        {
+            assert( m_rootParamIndx < m_rootParams.size() );
+            m_rootParamsMap[ id ] = m_rootParamIndx++; 
+        }
+        inline void addStaticSamplerIdToMap( const char* id ) 
+        { 
+            assert( m_staticSamplerIndx < m_staticSamplers.size() );
+            m_staticSamplersMap[ id ] = m_staticSamplerIndx++;
+        }
+
         // Internal set of root parameters and static samplers.
+        std::map<const char*, UINT> m_rootParamsMap;
+        std::map<const char*, UINT> m_staticSamplersMap;
         std::vector<CD3DX12_ROOT_PARAMETER> m_rootParams;
         std::vector<CD3DX12_STATIC_SAMPLER_DESC> m_staticSamplers;
+
+        // Root parameter and static sampler counters.
+        UINT m_rootParamIndx, m_staticSamplerIndx;
+
+        // Total no. of descriptor ranges. Just to make it easier when we need to allocate descriptor heaps.
+        UINT m_totalNumDescriptorRanges;
 
         // Root signature object.
         ComPtr<ID3D12RootSignature> m_rootSignature;

@@ -536,45 +536,80 @@ namespace rsmgpt
             // NOTE: The SRV to the path tracer output render target cannot be created as a root descriptor
             //       because it pertains to a 2d texture and root descriptors can only be created for
             //       structured and append/consume structured buffers.
-            m_rsGfxDraw.reset( PTGfxRootParametersCount, 1 );
+            m_rsGfxDraw.reset( new RootSignature( 1, 1 ) );
+            //m_rsGfxDraw.reset( PTGfxRootParametersCount, 1 );
 
             UINT nDescriptors( 1 ), baseShaderRegister( 0 );
-            CD3DX12_DESCRIPTOR_RANGE srvOutput( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, nDescriptors, baseShaderRegister );
-            m_rsGfxDraw[ PTGfxSrvTable ].InitAsDescriptorTable( 1, &srvOutput, D3D12_SHADER_VISIBILITY_PIXEL );
+            m_rsGfxDraw->addDescriptorTable(
+                "PTGfxSrvTable",
+                1,
+                &CD3DX12_DESCRIPTOR_RANGE( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, nDescriptors, baseShaderRegister ),
+                D3D12_SHADER_VISIBILITY_PIXEL );
+            //CD3DX12_DESCRIPTOR_RANGE srvOutput( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, nDescriptors, baseShaderRegister );
+            //m_rsGfxDraw[ PTGfxSrvTable ].InitAsDescriptorTable( 1, &srvOutput, D3D12_SHADER_VISIBILITY_PIXEL );
 
             // Create the static sampler desc for the point sampler in rsmgptPathTracingOutputPS.
-            CD3DX12_STATIC_SAMPLER_DESC psSamplerDesc =
-                CD3DX12_STATIC_SAMPLER_DESC(
-                    0,                                      // Shader bind slot.
-                    D3D12_FILTER_MIN_MAG_MIP_POINT,         // Filtering mode.
-                    D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // U address mode.
-                    D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // V address mode.
-                    D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // W address mode.
-                    0.f,                                    // Mip LOD bias (default value).
-                    16U,                                    // Max anisotropy (default value).
-                    D3D12_COMPARISON_FUNC_LESS_EQUAL,       // Sampler comparison function (default value).
-                    D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, // Border colour.
-                    0.f,                                    // Min LOD (default value).
-                    D3D12_FLOAT32_MAX,                      // Max LOD (default value).
-                    D3D12_SHADER_VISIBILITY_PIXEL,          // Shader visibility.
-                    0U );                                   // Register space.
-            m_rsGfxDraw.initStaticSampler( 0, psSamplerDesc );
+            /*CD3DX12_STATIC_SAMPLER_DESC psSamplerDesc =
+                CD3DX12_STATIC_SAMPLER_DESC(*/
+            m_rsGfxDraw->addStaticSampler(
+                "PTGfxPointSam",
+                0,                                      // Shader bind slot.
+                D3D12_FILTER_MIN_MAG_MIP_POINT,         // Filtering mode.
+                D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // U address mode.
+                D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // V address mode.
+                D3D12_TEXTURE_ADDRESS_MODE_BORDER,      // W address mode.
+                0.f,                                    // Mip LOD bias (default value).
+                16U,                                    // Max anisotropy (default value).
+                D3D12_COMPARISON_FUNC_LESS_EQUAL,       // Sampler comparison function (default value).
+                D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK, // Border colour.
+                0.f,                                    // Min LOD (default value).
+                D3D12_FLOAT32_MAX,                      // Max LOD (default value).
+                D3D12_SHADER_VISIBILITY_PIXEL,          // Shader visibility.
+                0U );                                   // Register space.
+            //m_rsGfxDraw.initStaticSampler( 0, psSamplerDesc );
 
             // Create the graphics root signature description.
-            m_rsGfxDraw.finalize( m_d3d12Device.Get() );
+            m_rsGfxDraw->finalize( m_d3d12Device.Get() );
 
             // The first compute root parameters is one CBV root descriptor which corresponds to the cbPerFrame in the path tracing kernel.
-            m_rsCompute.reset( PTComputeRootParametersCount, 0 );
-            m_rsCompute[ PTCbvCbPerFrame ].InitAsConstantBufferView( 0 );
+            m_rsCompute.reset( new RootSignature( 3, 0 ) );
+            m_rsCompute->addCBV( "PTCbvCbPerFrame", 0 );
+            //m_rsCompute[ PTCbvCbPerFrame ].InitAsConstantBufferView( 0 );
+
+            // NOTE: Ran into an interesting optimization phenomenon here. Inlining the pDescriptorRanges parameters for the PTComputeSrvTable and
+            //       and PTComputeUavTable descriptor tables resulted in them pointing to the same location (i.e., PTComputeUavTable's pDescriptorRanges
+            //       parameter), which lead to a crash when the root signature was serialized. It's probably a good idea to keep whatever pDescriptorRanges
+            //       points to around until the root signature is serialized. Keeping the code around as a reference.
+#if 0
+            // The second compute root parameter is a table to the model vertex buffer, primitive and BVH node array SRVs.
+            m_rsCompute->addDescriptorTable(
+                "PTComputeSrvTable",
+                1,
+                &CD3DX12_DESCRIPTOR_RANGE( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, PTComputeSrvTableRange, 0 ) );
+
+            // The third compute root parameter is a table to the render output UAVs.
+            m_rsCompute->addDescriptorTable(
+                "PTComputeUavTable",
+                1,
+                &CD3DX12_DESCRIPTOR_RANGE( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, PTComputeUavTableRange, 0 ) );
+#endif // 0
 
             // The second compute root parameter is a table to the model vertex buffer, primitive and BVH node array SRVs.
             CD3DX12_DESCRIPTOR_RANGE srvTable( D3D12_DESCRIPTOR_RANGE_TYPE_SRV, PTComputeSrvTableRange, 0 );
-            m_rsCompute[ PTComputeSrvTable ].InitAsDescriptorTable( 1, &srvTable );
+            m_rsCompute->addDescriptorTable(
+                "PTComputeSrvTable",
+                1,
+                &srvTable );
 
             // The third compute root parameter is a table to the render output UAVs.
             CD3DX12_DESCRIPTOR_RANGE uavOutput( D3D12_DESCRIPTOR_RANGE_TYPE_UAV, PTComputeUavTableRange, 0 );
-            m_rsCompute[ PTComputeUavTable ].InitAsDescriptorTable( 1, &uavOutput );
-            m_rsCompute.finalize( m_d3d12Device.Get() );
+            m_rsCompute->addDescriptorTable(
+                "PTComputeUavTable",
+                1,
+                &uavOutput );
+
+            // Finalize the root signature.
+            m_rsCompute->finalize( m_d3d12Device.Get() );
         }
 
         // Create the pipeline state, which includes compiling and loading shaders.
@@ -590,7 +625,7 @@ namespace rsmgpt
             // Describe and create the graphics pipeline state objects (PSO).
             D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
             psoDesc.InputLayout = { inputElementDescs, _countof( inputElementDescs ) };
-            psoDesc.pRootSignature = m_rsGfxDraw.get(); //m_gfxRootSignature.Get();
+            psoDesc.pRootSignature = m_rsGfxDraw->pRootSignature(); //m_gfxRootSignature.Get();
             psoDesc.VS = { g_prsmgptPathTracingOutputVS, _countof( g_prsmgptPathTracingOutputVS ) };
             psoDesc.PS = { g_prsmgptPathTracingOutputPS, _countof( g_prsmgptPathTracingOutputPS ) };
             psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC( D3D12_DEFAULT );
@@ -607,7 +642,7 @@ namespace rsmgpt
 
             // Describe and create the compute pipeline state object (PSO).
             D3D12_COMPUTE_PIPELINE_STATE_DESC computePsoDesc = {};
-            computePsoDesc.pRootSignature = m_rsCompute.get();
+            computePsoDesc.pRootSignature = m_rsCompute->pRootSignature();
             computePsoDesc.CS = { g_prsmgptPathTracingKernelCS, _countof( g_prsmgptPathTracingKernelCS ) };
 
             ThrowIfFailed( m_d3d12Device->CreateComputePipelineState( &computePsoDesc, IID_PPV_ARGS( &m_psoPathTracer ) ) );
@@ -1317,24 +1352,28 @@ namespace rsmgpt
         // Define the debug gfx root signature.
         {
             constexpr UINT matSize( sizeof( Mat4 ) / sizeof( UINT ) );
-            m_rsGfxDraw.reset( DebugGfxRootParametersCount, 0 );
+            m_rsGfxDraw.reset( new RootSignature( 2, 0 ) );
 
             // BasicTrans VS constant buffer.
-            m_rsGfxDraw[ DebugGfxVSBasicTrans ].InitAsConstants(
+            //m_rsGfxDraw[ DebugGfxVSBasicTrans ].InitAsConstants(
+            m_rsGfxDraw->addConstants(
+                "DebugGfxVSBasicTrans",
                 matSize,                            // 1 float4x4
                 0,                                  // b0
                 0,                                  // space0
                 D3D12_SHADER_VISIBILITY_VERTEX );   // vertex shader visible
 
             // BasicOutput PS constant buffer.
-            m_rsGfxDraw[ DebugGfxPSBasicOutput ].InitAsConstants(
+            //m_rsGfxDraw[ DebugGfxPSBasicOutput ].InitAsConstants(
+            m_rsGfxDraw->addConstants(
+                "DebugGfxPSBasicOutput",
                 4,                                  // float4
                 0,                                  // b0
                 1,                                  // space1
                 D3D12_SHADER_VISIBILITY_PIXEL );    // pixel shader visible
 
             // Finalize the gfx root signature.
-            m_rsGfxDraw.finalize( m_d3d12Device.Get() );
+            m_rsGfxDraw->finalize( m_d3d12Device.Get() );
         }
 
         // Define the debug gfx PSO.
@@ -1343,7 +1382,7 @@ namespace rsmgpt
             const auto inputElementDescs = Model::inputElementDesc();
             const std::array<DXGI_FORMAT, 1> RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM };
             CD3DX12_GRAPHICS_PIPELINE_STATE_DESC psoDesc(
-                m_rsGfxDraw.get(),
+                m_rsGfxDraw->pRootSignature(),
                 { g_prsmgptBasicVS, _countof( g_prsmgptBasicVS ) },
                 { g_prsmgptBasicPS, _countof( g_prsmgptBasicPS ) },
                 { inputElementDescs.data(), static_cast<UINT>( inputElementDescs.size() ) },
@@ -1358,43 +1397,51 @@ namespace rsmgpt
 
         // Define the debug ray and bbox root signatures.
         {
-            m_rsDebugRay.reset( DebugRayRootParametersCount, 0 );
+            m_rsDebugRay.reset( new RootSignature( 2, 0 ) );
 
             // Debug Ray GS constant buffer.
-            m_rsDebugRay[ DebugRayGSParams ].InitAsConstants(
+            //m_rsDebugRay[ DebugRayGSParams ].InitAsConstants(
+            m_rsDebugRay->addConstants(
+                "DebugRayGSParams",
                 sizeof( DebugRay ) / sizeof( UINT ),
                 0,                                      // b0
                 0,                                      // space0
                 D3D12_SHADER_VISIBILITY_GEOMETRY );     // geometry shader visible
 
             // Debug Ray PS constant buffer.
-            m_rsDebugRay[ DebugRayPSParams ].InitAsConstants(
+            //m_rsDebugRay[ DebugRayPSParams ].InitAsConstants(
+            m_rsDebugRay->addConstants(
+                "DebugRayPSParams",
                 sizeof( Colour ) / sizeof( UINT ),
                 0,                                  // b0
                 1,                                  // space 1
                 D3D12_SHADER_VISIBILITY_PIXEL );    // pixel shader visible
 
             // Finalize the Bounds gfx root signature.
-            m_rsDebugRay.finalize( m_d3d12Device.Get() );
+            m_rsDebugRay->finalize( m_d3d12Device.Get() );
 
-            m_rsDebugBounds.reset( DebugBoundsRootParamsCount, 0 );
+            m_rsDebugBounds.reset( new RootSignature( 2, 0 ) );
 
             // Debug Bounds GS constant buffer.
-            m_rsDebugBounds[ DebugBoundsGSParams ].InitAsConstants(
+            //m_rsDebugBounds[ DebugBoundsGSParams ].InitAsConstants(
+            m_rsDebugBounds->addConstants(
+                "DebugBoundsGSParams",
                 sizeof( DebugBounds ) / sizeof( UINT ),
                 0,                                  // b0
                 0,                                  // space 0
                 D3D12_SHADER_VISIBILITY_GEOMETRY ); // geometry shader visible
 
             // Debug Bounds PS constant buffer.
-            m_rsDebugBounds[ DebugBoundsPSParams ].InitAsConstants(
+            //m_rsDebugBounds[ DebugBoundsPSParams ].InitAsConstants(
+            m_rsDebugBounds->addConstants(
+                "DebugBoundsPSParams",
                 sizeof( Colour ) / sizeof( UINT ),
                 0,                                  // b0
                 1,                                  // space 1
                 D3D12_SHADER_VISIBILITY_PIXEL );    // pixel shader visible
 
             // Finalize the debug bounds root signature.
-            m_rsDebugBounds.finalize( m_d3d12Device.Get() );
+            m_rsDebugBounds->finalize( m_d3d12Device.Get() );
         }
 
         // Define the debug ray and bounds PSOs.
@@ -1402,7 +1449,7 @@ namespace rsmgpt
             // Describe and create the graphics pipeline state objects (PSO).
             const std::array<DXGI_FORMAT, 1> RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM };
             CD3DX12_GRAPHICS_PIPELINE_STATE_DESC psoDesc(
-                m_rsDebugRay.get(),
+                m_rsDebugRay->pRootSignature(),
                 { g_prsmgptBoundsVS, _countof( g_prsmgptBoundsVS ) },
                 { g_prsmgptBoundsPS, _countof( g_prsmgptBoundsPS ) },
                 { nullptr, 0 },
@@ -1417,7 +1464,7 @@ namespace rsmgpt
             ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_psoDebugRay ) ) );
 
             // Just change the root signature and geometry shader to define the debug bounds PSO.
-            psoDesc.pRootSignature = m_rsDebugBounds.get();
+            psoDesc.pRootSignature = m_rsDebugBounds->pRootSignature();
             psoDesc.GS = { g_prsmgptBoundsGS, _countof( g_prsmgptBoundsGS ) };
             ThrowIfFailed( m_d3d12Device->CreateGraphicsPipelineState( &psoDesc, IID_PPV_ARGS( &m_psoDebugBounds ) ) );
         }
@@ -1606,7 +1653,7 @@ namespace rsmgpt
         m_gpuTimer->startTimer( m_frameIndex, "pathTracer", m_clPathTracer.Get() );
 
         // Set the compute root signature.
-        m_clPathTracer->SetComputeRootSignature( m_rsCompute.get() );
+        m_clPathTracer->SetComputeRootSignature( m_rsCompute->pRootSignature() );
 
         // Set the descriptor heaps.
         std::array<ID3D12DescriptorHeap*, 1> cbvSrvUavHeaps = { m_pCsuHeap->getHeap() };
@@ -1630,12 +1677,14 @@ namespace rsmgpt
         memcpy( m_pCbvDataBegin, &m_cbPerFrame, sizeof( PTCbPerFrame ) );   // This will be updated at runtime.
 
         // Set the compute pipeline bindings.
-        m_clPathTracer->SetComputeRootConstantBufferView( PTCbvCbPerFrame, m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
+        m_clPathTracer->SetComputeRootConstantBufferView( 
+            /*PTCbvCbPerFrame*/m_rsCompute->getRootParamIndex( "PTCbvCbPerFrame" ), 
+            m_constantBuffer->GetGPUVirtualAddress() );  // Set cbPerFrame.
         m_clPathTracer->SetComputeRootDescriptorTable(
-            PTComputeSrvTable,
+            /*PTComputeSrvTable*/m_rsCompute->getRootParamIndex( "PTComputeSrvTable" ), 
             m_pCsuHeap->getGPUHandle( "gVertexBuffer" ) );  // Set the SRV table.
         m_clPathTracer->SetComputeRootDescriptorTable(
-            PTComputeUavTable,
+            /*PTComputeUavTable*/m_rsCompute->getRootParamIndex( "PTComputeUavTable" ),
             m_pCsuHeap->getGPUHandle( "gOutput" ) );    // Set the UAV table.
 
 #ifdef GENERATE_DEBUG_INFO
@@ -1681,7 +1730,7 @@ namespace rsmgpt
         // Record the rendering commands.
         {
             // Set necessary state.
-            m_clGfx->SetGraphicsRootSignature( m_rsGfxDraw.get() );
+            m_clGfx->SetGraphicsRootSignature( m_rsGfxDraw->pRootSignature() );
 
             // Set the descriptor heaps again for the graphics pipeline.
             m_clGfx->SetDescriptorHeaps(
@@ -1718,7 +1767,7 @@ namespace rsmgpt
 
             // Bind the path tracer output SRV to the graphics pipeline.
             m_clGfx->SetGraphicsRootDescriptorTable(
-                PTGfxSrvTable,
+                /*PTGfxSrvTable*/m_rsGfxDraw->getRootParamIndex( "PTGfxSrvTable" ),
                 m_pCsuHeap->getGPUHandle( "gptOutput" ) ); // Set the UAV table.
 
             // Add a barrier indicating that the path tracer output is going to be used as an SRV.
@@ -1840,7 +1889,7 @@ namespace rsmgpt
         ThrowIfFailed( m_clGfx->Reset( m_commandAllocators[ m_frameIndex ].Get(), m_psoDebugAccel.Get() ) );
 
         // Set the debug gfx root signature.
-        m_clGfx->SetGraphicsRootSignature( m_rsGfxDraw.get() );
+        m_clGfx->SetGraphicsRootSignature( m_rsGfxDraw->pRootSignature() );
 
         // Set the debug gfx pipeline state.
         m_clGfx->SetPipelineState( m_psoDebugAccel.Get() );
@@ -1872,7 +1921,7 @@ namespace rsmgpt
         //// Set the debug PS constants.
         const Colour debugColour = Colour( 1.f, 0.f, 0.f, 1.f );  // Use a debug colour of red.
         m_clGfx->SetGraphicsRoot32BitConstants(
-            DebugGfxPSBasicOutput,
+            /*DebugGfxPSBasicOutput*/m_rsGfxDraw->getRootParamIndex( "DebugGfxPSBasicOutput" ),
             sizeof( Colour ) / sizeof( float ),
             &debugColour,
             0 );
@@ -1881,7 +1930,7 @@ namespace rsmgpt
         const Mat4 viewProj = m_pDebugPerspectiveCamera->viewProj();
         m_pModel->draw(
             viewProj,
-            DebugGfxVSBasicTrans,
+            /*DebugGfxVSBasicTrans*/m_rsGfxDraw->getRootParamIndex( "DebugGfxVSBasicTrans" ),
             0,
             m_clGfx.Get() );
 
@@ -1891,7 +1940,7 @@ namespace rsmgpt
         m_clGfx->IASetIndexBuffer( nullptr );
 
         // Set the debug ray root signature, PSO.
-        m_clGfx->SetGraphicsRootSignature( m_rsDebugRay.get() );
+        m_clGfx->SetGraphicsRootSignature( m_rsDebugRay->pRootSignature() );
         m_clGfx->SetPipelineState( m_psoDebugRay.Get() );
 
         // Bind the debug ray for the GS params.
@@ -1901,7 +1950,7 @@ namespace rsmgpt
                 Vec3( 0.00023818585032131522893906, -0.59660404920578002929688, 0.80253571271896362304688 ) ),
             viewProj.Transpose() };
         m_clGfx->SetGraphicsRoot32BitConstants(
-            DebugRayGSParams,
+            /*DebugRayGSParams*/m_rsDebugRay->getRootParamIndex( "DebugGfxVSBasicTrans" ),
             sizeof(DebugRay) / sizeof(UINT),
             reinterpret_cast<const void*>(&debugRay),
             0 );
@@ -1918,7 +1967,7 @@ namespace rsmgpt
         m_clGfx->DrawInstanced( 2, 1, 0, 0 );
 
         // Set the debug bounds root signature and PSO.
-        m_clGfx->SetGraphicsRootSignature( m_rsDebugBounds.get() );
+        m_clGfx->SetGraphicsRootSignature( m_rsDebugBounds->pRootSignature() );
         m_clGfx->SetPipelineState( m_psoDebugBounds.Get() );
 
         // Draw the intersected BVH nodes.
@@ -1928,8 +1977,8 @@ namespace rsmgpt
             m_pModel->vertexList(),
             debugRay.gRay,
             viewProj,
-            DebugBoundsGSParams,
-            DebugBoundsPSParams,
+            /*DebugBoundsGSParams*/m_rsDebugBounds->getRootParamIndex( "DebugBoundsGSParams" ),
+            /*DebugBoundsPSParams*/m_rsDebugBounds->getRootParamIndex( "DebugBoundsPSParams" ),
             visitedNodesColour,
             backtrackedNodesColour,
             m_bvhDebugLevel,
